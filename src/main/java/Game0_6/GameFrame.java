@@ -1,4 +1,4 @@
-package Game;
+package Game0_6;
 
 import javax.imageio.ImageIO;
 import java.awt.*;
@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-// 游戏主框架
+
 public class GameFrame extends Frame {
     private Tank player;
     private List<RedPacket> redPackets = new ArrayList<>();
@@ -17,22 +17,58 @@ public class GameFrame extends Frame {
     private int score = 0;
     private boolean isGameOver = false;
 
-    // 游戏配置
+
+    private Image bgImg;
+    private Image tankImg;
+    private Image redPacketImg;
+
+
     public static final int WIDTH = 600;
     public static final int HEIGHT = 600;
-    public static final int GAME_TIME = 30000; // 30秒游戏时间
+    public static final int GAME_TIME = 30000;
 
     public GameFrame() {
+        loadResources();
         initGame();
         initFrame();
         startGame();
     }
 
-    private void initGame() {
-        // 初始化玩家坦克
-        player = new Tank(WIDTH / 2 - 50, HEIGHT - 100, 100, 50, 5);
+    private void loadResources() {
+        try {
+            System.out.println("尝试加载背景图片: /images/R-C.jpg");
+            bgImg = loadImage("/images/R-C.jpg");
+            System.out.println("背景图片加载" + (bgImg != null ? "成功" : "失败"));
 
-        // 初始化计时器
+            System.out.println("尝试加载坦克图片: /images/tank.jpg");
+            tankImg = loadImage("/images/tank.jpg");
+            System.out.println("坦克图片加载" + (tankImg != null ? "成功" : "失败"));
+
+            System.out.println("尝试加载红包图片: /images/redpacket.png");
+            redPacketImg = loadImage("/images/redpacket.png");
+            System.out.println("红包图片加载" + (redPacketImg != null ? "成功" : "失败"));
+        } catch (Exception e) {
+            System.err.println("资源加载失败: " + e.getMessage());
+        }
+    }
+
+    private Image loadImage(String imagePath) {
+        URL url = getClass().getResource(imagePath);
+        if (url != null) {
+            try {
+                return ImageIO.read(url);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        System.err.println("无法加载图片: " + imagePath + "（资源路径不存在）");
+        return null;
+    }
+
+    private void initGame() {
+        player = new Tank(WIDTH / 2 - 50, HEIGHT - 100, 100, 50, 5);
+        System.out.println("初始化坦克位置: (" + player.getX() + ", " + player.getY() + ")");
+
         gameTimer = new GameTimer(GAME_TIME, () -> isGameOver = true);
     }
 
@@ -42,7 +78,7 @@ public class GameFrame extends Frame {
         setLocationRelativeTo(null);
         setResizable(false);
 
-        // 窗口关闭处理
+
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -50,7 +86,6 @@ public class GameFrame extends Frame {
             }
         });
 
-        // 键盘控制
         addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -66,15 +101,11 @@ public class GameFrame extends Frame {
     }
 
     private void startGame() {
-        // 启动游戏循环
         new PaintThread().start();
-        // 启动红包生成器
         new RedPacketSpawner().start();
-        // 启动计时器
         gameTimer.start();
     }
 
-    // 游戏主循环
     class PaintThread extends Thread {
         @Override
         public void run() {
@@ -92,19 +123,16 @@ public class GameFrame extends Frame {
         }
     }
 
-    // 红包生成器
     class RedPacketSpawner extends Thread {
         private Random random = new Random();
 
         @Override
         public void run() {
             while (!isGameOver) {
-                // 随机生成红包
                 int x = random.nextInt(WIDTH - 30);
                 redPackets.add(new RedPacket(x, 0, 30, 30, 3 + random.nextInt(4)));
 
                 try {
-                    // 随机间隔生成红包
                     Thread.sleep(500 + random.nextInt(1000));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
@@ -114,22 +142,19 @@ public class GameFrame extends Frame {
     }
 
     private void updateGame() {
-        // 更新玩家位置
         player.updatePosition();
+        System.out.println("坦克当前位置: (" + player.getX() + ", " + player.getY() + ")");
 
-        // 更新红包位置并检测碰撞
         List<RedPacket> toRemove = new ArrayList<>();
         for (RedPacket rp : redPackets) {
             rp.updatePosition();
 
-            // 检测是否超出屏幕
             if (rp.getY() > HEIGHT) {
                 toRemove.add(rp);
-            }
-            // 检测碰撞
-            else if (player.collidesWith(rp)) {
+            } else if (player.collidesWith(rp)) {
                 toRemove.add(rp);
                 score++;
+                System.out.println("收集到红包！当前分数: " + score);
             }
         }
         redPackets.removeAll(toRemove);
@@ -137,26 +162,33 @@ public class GameFrame extends Frame {
 
     @Override
     public void paint(Graphics g) {
-        // 绘制背景
-        g.setColor(Color.WHITE);
-        g.fillRect(0, 0, WIDTH, HEIGHT);
-
-        // 绘制玩家
-        g.setColor(Color.BLUE);
-        player.draw(g);
-
-        // 绘制红包
-        g.setColor(Color.RED);
-        for (RedPacket rp : redPackets) {
-            rp.draw(g);
+        if (bgImg != null) {
+            g.drawImage(bgImg, 0, 0, WIDTH, HEIGHT, null);
+        } else {
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, WIDTH, HEIGHT);
         }
 
-        // 绘制分数和剩余时间
+        if (tankImg != null) {
+            player.draw(g, tankImg);
+        } else {
+            g.setColor(Color.BLUE);
+            player.draw(g, null);
+        }
+
+        for (RedPacket rp : redPackets) {
+            if (redPacketImg != null) {
+                rp.draw(g, redPacketImg);
+            } else {
+                g.setColor(Color.RED);
+                rp.draw(g, null);
+            }
+        }
+
         g.setColor(Color.BLACK);
         g.drawString("分数: " + score, 20, 30);
         g.drawString("剩余时间: " + gameTimer.getRemainingTime() / 1000 + "秒", 20, 50);
 
-        // 游戏结束显示
         if (isGameOver) {
             g.setColor(Color.RED);
             g.setFont(new Font("宋体", Font.BOLD, 40));
@@ -165,7 +197,6 @@ public class GameFrame extends Frame {
         }
     }
 
-    // 双缓冲解决闪烁
     private Image offScreenImage;
     @Override
     public void update(Graphics g) {
@@ -182,7 +213,6 @@ public class GameFrame extends Frame {
     }
 }
 
-// 游戏物体基类
 abstract class GameObject {
     protected int x, y;
     protected int width, height;
@@ -199,7 +229,6 @@ abstract class GameObject {
     public int getWidth() { return width; }
     public int getHeight() { return height; }
 
-    // 检测碰撞
     public boolean collidesWith(GameObject other) {
         return x < other.x + other.width &&
                 x + width > other.x &&
@@ -207,11 +236,10 @@ abstract class GameObject {
                 y + height > other.y;
     }
 
-    public abstract void draw(Graphics g);
+    public abstract void draw(Graphics g, Image img);
     public abstract void updatePosition();
 }
 
-// 玩家坦克类
 class Tank extends GameObject {
     private int speed;
     private boolean left, right, up, down;
@@ -272,14 +300,16 @@ class Tank extends GameObject {
     }
 
     @Override
-    public void draw(Graphics g) {
-        g.fillRect(x, y, width, height);
-        // 绘制炮管
-        g.fillRect(x + width/2 - 5, y - 10, 10, 20);
+    public void draw(Graphics g, Image img) {
+        if (img != null) {
+            g.drawImage(img, x, y, width, height, null);
+        } else {
+            g.fillRect(x, y, width, height);
+            g.fillRect(x + width/2 - 5, y - 10, 10, 20);
+        }
     }
 }
 
-// 红包类
 class RedPacket extends GameObject {
     private int speed;
 
@@ -290,21 +320,22 @@ class RedPacket extends GameObject {
 
     @Override
     public void updatePosition() {
-        // 竖直下落
         y += speed;
     }
 
     @Override
-    public void draw(Graphics g) {
-        // 绘制红包形状
-        g.fillRect(x, y, width, height);
-        g.setColor(Color.YELLOW);
-        g.drawString("¥", x + 10, y + 20);
-        g.setColor(Color.RED);
+    public void draw(Graphics g, Image img) {
+        if (img != null) {
+            g.drawImage(img, x, y, width, height, null);
+        } else {
+            g.fillRect(x, y, width, height);
+            g.setColor(Color.YELLOW);
+            g.drawString("¥", x + 10, y + 20);
+            g.setColor(Color.RED);
+        }
     }
 }
 
-// 游戏计时器
 class GameTimer extends Thread {
     private long totalTime;
     private long remainingTime;
