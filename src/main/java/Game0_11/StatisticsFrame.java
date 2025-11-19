@@ -2,6 +2,7 @@ package Game0_11;
 
 import javax.swing.*;
 import javax.swing.table.*;
+import javax.swing.SwingWorker;
 import java.awt.*;
 import java.util.*;
 import java.util.List;
@@ -15,6 +16,7 @@ public class StatisticsFrame extends JFrame {
     private CFunctionAnalyzer analyzer;
     private CFunctionStatistics statistics;
     private List<CFunctionAnalyzer.FunctionInfo> functions;
+    private String exportFormat;  // 导出格式
     
     // 颜色方案
     private static final Color PRIMARY_COLOR = new Color(52, 152, 219);
@@ -22,10 +24,11 @@ public class StatisticsFrame extends JFrame {
     private static final Color WARNING_COLOR = new Color(241, 196, 15);
     private static final Color DANGER_COLOR = new Color(231, 76, 60);
     
-    public StatisticsFrame(CFunctionAnalyzer analyzer, CFunctionStatistics statistics) {
+    public StatisticsFrame(CFunctionAnalyzer analyzer, CFunctionStatistics statistics, String exportFormat) {
         this.analyzer = analyzer;
         this.statistics = statistics;
         this.functions = analyzer.getFunctions();
+        this.exportFormat = exportFormat;
         
         initUI();
     }
@@ -36,6 +39,9 @@ public class StatisticsFrame extends JFrame {
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
         
+        // 创建主面板
+        JPanel mainPanel = new JPanel(new BorderLayout());
+        
         // 使用选项卡展示不同的视图
         JTabbedPane tabbedPane = new JTabbedPane();
         
@@ -44,7 +50,63 @@ public class StatisticsFrame extends JFrame {
         tabbedPane.addTab("📋 函数详情", createDetailPanel());
         tabbedPane.addTab("💡 代码建议", createAdvicePanel());
         
-        add(tabbedPane);
+        mainPanel.add(tabbedPane, BorderLayout.CENTER);
+        
+        // 添加导出按钮面板
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton exportButton = new JButton("💾 导出统计结果");
+        exportButton.setFont(new Font("微软雅黑", Font.BOLD, 14));
+        exportButton.addActionListener(e -> exportStatistics());
+        buttonPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        buttonPanel.add(exportButton);
+        
+        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+        
+        add(mainPanel);
+    }
+    
+    /**
+     * 导出统计结果
+     */
+    private void exportStatistics() {
+        // 显示文件保存对话框
+        String filePath = ExportUtil.showSaveDialog(this, exportFormat);
+        
+        if (filePath != null) {
+            // 在后台线程中执行导出
+            SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                @Override
+                protected Boolean doInBackground() throws Exception {
+                    return ExportUtil.exportStatistics(analyzer, statistics, exportFormat, filePath);
+                }
+                
+                @Override
+                protected void done() {
+                    try {
+                        Boolean success = get();
+                        if (success) {
+                            JOptionPane.showMessageDialog(StatisticsFrame.this,
+                                "统计结果已成功导出到:\n" + filePath,
+                                "导出成功",
+                                JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    } catch (Exception e) {
+                        JOptionPane.showMessageDialog(StatisticsFrame.this,
+                            "导出失败:\n" + e.getMessage(),
+                            "错误",
+                            JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            };
+            
+            worker.execute();
+            
+            // 显示进度提示
+            JOptionPane.showMessageDialog(this,
+                "正在导出统计结果，请稍候...",
+                "导出中",
+                JOptionPane.INFORMATION_MESSAGE);
+        }
     }
     
     /**

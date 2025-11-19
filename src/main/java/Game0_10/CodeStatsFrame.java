@@ -2,8 +2,17 @@ package Game0_10;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.*;
+import java.nio.file.*;
 import java.util.*;
 import java.util.List;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.DataFormat;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 /**
  * 代码统计图形界面 - 用漂亮的图表展示代码统计结果
@@ -51,6 +60,14 @@ public class CodeStatsFrame extends JFrame {
         tabbedPane.addTab("📋 详细数据", createDetailPanel());
         
         add(tabbedPane);
+        
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton exportButton = new JButton("💾 导出统计结果");
+        exportButton.setFont(new Font("微软雅黑", Font.BOLD, 14));
+        exportButton.addActionListener(e -> onExport());
+        buttonPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        buttonPanel.add(exportButton);
+        add(buttonPanel, BorderLayout.SOUTH);
     }
     
     /**
@@ -488,27 +505,261 @@ public class CodeStatsFrame extends JFrame {
         return panel;
     }
     
+    private void onExport() {
+        String[] options = {"CSV", "JSON", "XLSX"};
+        int choice = JOptionPane.showOptionDialog(this, "选择导出格式", "导出统计结果",
+                JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, options, options[0]);
+        if (choice < 0) return;
+        String format = options[choice].toLowerCase();
+        String filePath = showSaveDialog(this, format);
+        if (filePath == null) return;
+        boolean ok = false;
+        try {
+            switch (format) {
+                case "csv":
+                    ok = exportToCSV(filePath);
+                    break;
+                case "json":
+                    ok = exportToJSON(filePath);
+                    break;
+                case "xlsx":
+                    ok = exportToXLSX(filePath);
+                    break;
+            }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "导出失败:\n" + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (ok) {
+            JOptionPane.showMessageDialog(this, "已导出到:\n" + filePath, "导出成功", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private String showSaveDialog(Component parent, String format) {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("保存统计结果");
+        String extension = format.toLowerCase();
+        javax.swing.filechooser.FileFilter filter;
+        if ("csv".equals(extension)) {
+            filter = new javax.swing.filechooser.FileFilter() {
+                public boolean accept(File f) { return f.isDirectory() || f.getName().toLowerCase().endsWith(".csv"); }
+                public String getDescription() { return "CSV文件 (*.csv)"; }
+            };
+        } else if ("json".equals(extension)) {
+            filter = new javax.swing.filechooser.FileFilter() {
+                public boolean accept(File f) { return f.isDirectory() || f.getName().toLowerCase().endsWith(".json"); }
+                public String getDescription() { return "JSON文件 (*.json)"; }
+            };
+        } else {
+            filter = new javax.swing.filechooser.FileFilter() {
+                public boolean accept(File f) { return f.isDirectory() || f.getName().toLowerCase().endsWith(".xlsx"); }
+                public String getDescription() { return "Excel文件 (*.xlsx)"; }
+            };
+        }
+        fileChooser.setFileFilter(filter);
+        fileChooser.setSelectedFile(new File("代码统计结果." + extension));
+        int result = fileChooser.showSaveDialog(parent);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            String path = fileChooser.getSelectedFile().getAbsolutePath();
+            if (!path.toLowerCase().endsWith("." + extension)) path += "." + extension;
+            return path;
+        }
+        return null;
+    }
+
+    private boolean exportToCSV(String filePath) throws IOException {
+        Map<String, Integer> lineCount = codeStats.getLanguageLineCount();
+        Map<String, Integer> fileCount = codeStats.getLanguageFileCount();
+        int totalLines = codeStats.getTotalLines();
+        try (PrintWriter w = new PrintWriter(new FileWriter(filePath, false))) {
+            w.write('\ufeff');
+            w.println("语言,行数,文件数,占比");
+            lineCount.entrySet().stream()
+                    .sorted((e1,e2)->e2.getValue().compareTo(e1.getValue()))
+                    .forEach(e -> {
+                        String lang = e.getKey();
+                        int lines = e.getValue();
+                        int files = fileCount.getOrDefault(lang, 0);
+                        double pct = totalLines == 0 ? 0.0 : (lines * 100.0 / totalLines);
+                        w.printf("%s,%d,%d,%.2f%%%n", escapeCSV(lang), lines, files, pct);
+                    });
+            if (pythonAnalyzer.getFunctionCount() > 0) {
+                w.println();
+                w.println("Python函数统计");
+                w.printf("函数总数,%d%n", pythonAnalyzer.getFunctionCount());
+                w.printf("平均长度,%.2f%n", pythonAnalyzer.getAverage());
+                w.printf("最大长度,%d%n", pythonAnalyzer.getMax());
+                w.printf("最小长度,%d%n", pythonAnalyzer.getMin());
+                w.printf("中位数,%.2f%n", pythonAnalyzer.getMedian());
+            }
+        }
+        return true;
+    }
+
+    private boolean exportToJSON(String filePath) throws IOException {
+        Map<String, Integer> lineCount = codeStats.getLanguageLineCount();
+        Map<String, Integer> fileCount = codeStats.getLanguageFileCount();
+        int totalLines = codeStats.getTotalLines();
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"summary\": {\n");
+        json.append("    \"totalFiles\": ").append(codeStats.getTotalFiles()).append(",\n");
+        json.append("    \"totalLines\": ").append(totalLines).append("\n");
+        json.append("  },\n");
+        json.append("  \"languages\": [\n");
+        List<Map.Entry<String,Integer>> list = new ArrayList<>(lineCount.entrySet());
+        list.sort((a,b)->b.getValue().compareTo(a.getValue()));
+        for (int i=0;i<list.size();i++) {
+            Map.Entry<String,Integer> e = list.get(i);
+            String lang = e.getKey();
+            int lines = e.getValue();
+            int files = fileCount.getOrDefault(lang,0);
+            double pct = totalLines == 0 ? 0.0 : (lines * 100.0 / totalLines);
+            json.append("    {\n");
+            json.append("      \"language\": \"").append(escapeJSON(lang)).append("\",\n");
+            json.append("      \"lines\": ").append(lines).append(",\n");
+            json.append("      \"files\": ").append(files).append(",\n");
+            json.append(String.format("      \"percentage\": %.2f\n", pct));
+            json.append("    }");
+            if (i<list.size()-1) json.append(",");
+            json.append("\n");
+        }
+        json.append("  ]");
+        if (pythonAnalyzer.getFunctionCount() > 0) {
+            json.append(",\n  \"python\": {\n");
+            json.append("    \"functionCount\": ").append(pythonAnalyzer.getFunctionCount()).append(",\n");
+            json.append("    \"average\": ").append(String.format("%.2f", pythonAnalyzer.getAverage())).append(",\n");
+            json.append("    \"min\": ").append(pythonAnalyzer.getMin()).append(",\n");
+            json.append("    \"max\": ").append(pythonAnalyzer.getMax()).append(",\n");
+            json.append("    \"median\": ").append(String.format("%.2f", pythonAnalyzer.getMedian())).append("\n");
+            json.append("  }");
+        }
+        json.append("\n}\n");
+        Files.write(Paths.get(filePath), json.toString().getBytes("UTF-8"));
+        return true;
+    }
+
+    private boolean exportToXLSX(String filePath) throws Exception {
+        try (Workbook wb = new XSSFWorkbook()) {
+            Sheet sheet = wb.createSheet("统计");
+            // 百分比样式
+            DataFormat df = wb.createDataFormat();
+            CellStyle pctStyle = wb.createCellStyle();
+            pctStyle.setDataFormat(df.getFormat("0.00%"));
+
+            int rowIndex = 0;
+            // 表头：语言/行数/文件数/占比（与CSV一致）
+            Row header = sheet.createRow(rowIndex++);
+            header.createCell(0).setCellValue("语言");
+            header.createCell(1).setCellValue("行数");
+            header.createCell(2).setCellValue("文件数");
+            header.createCell(3).setCellValue("占比");
+
+            Map<String,Integer> lineCount = codeStats.getLanguageLineCount();
+            Map<String,Integer> fileCount = codeStats.getLanguageFileCount();
+            int totalLines = codeStats.getTotalLines();
+            List<Map.Entry<String,Integer>> list = new ArrayList<>(lineCount.entrySet());
+            list.sort((a,b)->b.getValue().compareTo(a.getValue()));
+
+            for (Map.Entry<String,Integer> e : list) {
+                Row r = sheet.createRow(rowIndex++);
+                String lang = e.getKey();
+                int lines = e.getValue();
+                int files = fileCount.getOrDefault(lang,0);
+                double pct = totalLines == 0 ? 0.0 : (lines / (double) totalLines);
+                r.createCell(0).setCellValue(lang);
+                r.createCell(1).setCellValue(lines);
+                r.createCell(2).setCellValue(files);
+                Cell pctCell = r.createCell(3);
+                pctCell.setCellValue(pct);
+                pctCell.setCellStyle(pctStyle);
+            }
+
+            // 自动列宽
+            for (int c = 0; c < 4; c++) sheet.autoSizeColumn(c);
+
+            // 空行
+            rowIndex++;
+
+            // Python函数统计（与CSV一致）
+            if (pythonAnalyzer.getFunctionCount() > 0) {
+                Row title = sheet.createRow(rowIndex++);
+                title.createCell(0).setCellValue("Python函数统计");
+
+                Row r0 = sheet.createRow(rowIndex++);
+                r0.createCell(0).setCellValue("函数总数");
+                r0.createCell(1).setCellValue(pythonAnalyzer.getFunctionCount());
+
+                Row r1 = sheet.createRow(rowIndex++);
+                r1.createCell(0).setCellValue("平均长度");
+                r1.createCell(1).setCellValue(pythonAnalyzer.getAverage());
+
+                Row r2 = sheet.createRow(rowIndex++);
+                r2.createCell(0).setCellValue("最大长度");
+                r2.createCell(1).setCellValue(pythonAnalyzer.getMax());
+
+                Row r3 = sheet.createRow(rowIndex++);
+                r3.createCell(0).setCellValue("最小长度");
+                r3.createCell(1).setCellValue(pythonAnalyzer.getMin());
+
+                Row r4 = sheet.createRow(rowIndex++);
+                r4.createCell(0).setCellValue("中位数");
+                r4.createCell(1).setCellValue(pythonAnalyzer.getMedian());
+
+                // 自动列宽（再次）
+                sheet.autoSizeColumn(0);
+                sheet.autoSizeColumn(1);
+            }
+
+            try (FileOutputStream fos = new FileOutputStream(filePath)) {
+                wb.write(fos);
+            }
+        }
+        return true;
+    }
+
+    private String escapeCSV(String v) {
+        if (v == null) return "";
+        if (v.contains(",") || v.contains("\"") || v.contains("\n")) {
+            return "\"" + v.replace("\"", "\"\"") + "\"";
+        }
+        return v;
+    }
+
+    private String escapeJSON(String v) {
+        if (v == null) return "";
+        return v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    private static String chooseFolderDialog() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        chooser.setDialogTitle("选择要统计的代码目录");
+        chooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+        int result = chooser.showOpenDialog(null);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File selectedFile = chooser.getSelectedFile();
+            return selectedFile.getAbsolutePath();
+        }
+        return null;
+    }
+
     /**
      * 主程序入口
      */
     public static void main(String[] args) {
         System.out.println("🚀 代码统计分析器启动中...\n");
-        
-        // 要分析的文件夹路径
-        String folderPath = "/home/mutsumi/Workspace/tankGame/python-ce";
-        
-        // 创建统计器
+        String folderPath = chooseFolderDialog();
+        if (folderPath == null) {
+            return;
+        }
         CodeStatistics codeStats = new CodeStatistics();
         PythonFunctionAnalyzer pythonAnalyzer = new PythonFunctionAnalyzer();
-        
-        // 执行统计
         codeStats.scanFolder(folderPath);
         codeStats.printStatistics();
-        
         pythonAnalyzer.scanPythonFiles(folderPath);
         pythonAnalyzer.printStatistics();
-        
-        // 显示图形界面
         SwingUtilities.invokeLater(() -> {
             CodeStatsFrame frame = new CodeStatsFrame(codeStats, pythonAnalyzer);
             frame.setVisible(true);

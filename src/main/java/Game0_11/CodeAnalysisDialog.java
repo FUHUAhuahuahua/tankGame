@@ -15,6 +15,7 @@ public class CodeAnalysisDialog extends JDialog {
     private String selectedLanguage = "C";
     private boolean countEmptyLines = true;
     private boolean countCommentLines = true;
+    private String exportFormat = "csv";  // 导出格式：csv, json, xlsx
     private boolean confirmed = false;
     
     // UI组件
@@ -22,11 +23,12 @@ public class CodeAnalysisDialog extends JDialog {
     private JComboBox<String> languageCombo;
     private JCheckBox emptyLinesCheckBox;
     private JCheckBox commentLinesCheckBox;
+    private JComboBox<String> exportFormatCombo;
     
     public CodeAnalysisDialog(JFrame parent) {
         super(parent, "代码分析设置", true);
         initUI();
-        setSize(500, 350);
+        setSize(500, 420);
         setLocationRelativeTo(parent);
     }
     
@@ -69,16 +71,18 @@ public class CodeAnalysisDialog extends JDialog {
         gbc.weightx = 0;
         mainPanel.add(browseButton, gbc);
         
-        // 语言选择
+        // 语言选择面板
+        JPanel languagePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        languagePanel.add(new JLabel("编程语言:"));
+        
+        languageCombo = new JComboBox<>(new String[]{"C", "C++", "Java", "Python", "C#"});
+        languageCombo.setSelectedIndex(0);
+        languageCombo.setEnabled(true); // 支持多语言选择
+        languagePanel.add(languageCombo);
         gbc.gridx = 0;
         gbc.gridy = 2;
-        mainPanel.add(new JLabel("💻 编程语言:"), gbc);
-        
-        languageCombo = new JComboBox<>(new String[]{"C", "C++", "Java", "Python", "所有语言"});
-        languageCombo.setSelectedItem("C");
-        gbc.gridx = 1;
-        gbc.gridwidth = 2;
-        mainPanel.add(languageCombo, gbc);
+        gbc.gridwidth = 3;
+        mainPanel.add(languagePanel, gbc);
         
         // 分隔线
         JSeparator separator = new JSeparator();
@@ -108,11 +112,35 @@ public class CodeAnalysisDialog extends JDialog {
         gbc.gridy = 6;
         mainPanel.add(commentLinesCheckBox, gbc);
         
+        // 分隔线
+        JSeparator separator2 = new JSeparator();
+        gbc.gridx = 0;
+        gbc.gridy = 7;
+        gbc.gridwidth = 3;
+        gbc.insets = new Insets(15, 0, 15, 0);
+        mainPanel.add(separator2, gbc);
+        
+        // 导出格式选择
+        JLabel exportLabel = new JLabel("💾 导出格式:");
+        exportLabel.setFont(new Font("微软雅黑", Font.BOLD, 14));
+        gbc.gridx = 0;
+        gbc.gridy = 8;
+        gbc.gridwidth = 1;
+        gbc.insets = new Insets(5, 5, 10, 5);
+        mainPanel.add(exportLabel, gbc);
+        
+        exportFormatCombo = new JComboBox<>(new String[]{"CSV", "JSON", "XLSX"});
+        exportFormatCombo.setSelectedItem("CSV");
+        exportFormatCombo.setToolTipText("选择统计结果的导出格式");
+        gbc.gridx = 1;
+        gbc.gridwidth = 2;
+        mainPanel.add(exportFormatCombo, gbc);
+        
         // 提示信息
-        JLabel tipLabel = new JLabel("💡 提示: 取消勾选可以只统计纯代码行数");
+        JLabel tipLabel = new JLabel("💡 提示: 取消勾选可以只统计纯代码行数，分析完成后可以导出结果");
         tipLabel.setFont(new Font("微软雅黑", Font.PLAIN, 12));
         tipLabel.setForeground(Color.GRAY);
-        gbc.gridy = 7;
+        gbc.gridy = 9;
         gbc.insets = new Insets(10, 5, 5, 5);
         mainPanel.add(tipLabel, gbc);
         
@@ -194,6 +222,7 @@ public class CodeAnalysisDialog extends JDialog {
         selectedLanguage = (String) languageCombo.getSelectedItem();
         countEmptyLines = emptyLinesCheckBox.isSelected();
         countCommentLines = commentLinesCheckBox.isSelected();
+        exportFormat = ((String) exportFormatCombo.getSelectedItem()).toLowerCase();
     }
     
     // Getter方法
@@ -215,5 +244,9 @@ public class CodeAnalysisDialog extends JDialog {
     
     public boolean isCountCommentLines() {
         return countCommentLines;
+    }
+    
+    public String getExportFormat() {
+        return exportFormat;
     }
 }

@@ -1,6 +1,14 @@
 package Game0_11;
 
 import javax.swing.*;
+import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.util.Map;
+import javax.swing.SwingWorker;
+import javax.swing.SwingUtilities;
+import java.util.HashMap;
+import javax.swing.JOptionPane;
 
 /**
  * 主程序入口 - 代码统计分析器的启动器
@@ -46,89 +54,93 @@ public class Main {
         String language = dialog.getSelectedLanguage();
         boolean countEmptyLines = dialog.isCountEmptyLines();
         boolean countCommentLines = dialog.isCountCommentLines();
+        String exportFormat = dialog.getExportFormat();
         
         // 显示进度对话框
-        JProgressBar progressBar = new JProgressBar();
-        progressBar.setIndeterminate(true);
-        progressBar.setString("正在分析代码，请稍候...");
-        progressBar.setStringPainted(true);
-        
-        JDialog progressDialog = new JDialog(tempFrame, "分析中", true);
-        progressDialog.add(progressBar);
+        JDialog progressDialog = new JDialog(tempFrame, "分析中...", true);
         progressDialog.setSize(300, 100);
         progressDialog.setLocationRelativeTo(tempFrame);
         progressDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
         
+        JLabel progressLabel = new JLabel("正在分析多语言代码，请稍候...", JLabel.CENTER);
+        progressDialog.add(progressLabel);
+        
         // 在后台线程中执行分析
         SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            private CFunctionAnalyzer analyzer;
-            private CFunctionStatistics statistics;
-            private Exception error;
+            private MultiLanguageAnalyzer analyzer;
+            private Map<MultiLanguageAnalyzer.Language, MultiLanguageAnalyzer.LanguageStatistics> languageStats;
+            private Map<String, Object> overallStats;
             
             @Override
             protected Void doInBackground() throws Exception {
-                try {
-                    // 创建分析器
-                    analyzer = new CFunctionAnalyzer();
-                    analyzer.setCountOptions(countEmptyLines, countCommentLines);
-                    
-                    // 执行分析
-                    System.out.println("开始分析文件夹: " + folderPath);
-                    analyzer.analyzeFolder(folderPath);
-                    
-                    // 计算统计数据
-                    statistics = analyzer.calculateStatistics();
-                    
-                } catch (Exception e) {
-                    error = e;
-                    e.printStackTrace();
-                }
+                analyzer = new MultiLanguageAnalyzer();
+                analyzer.setCountOptions(countEmptyLines, countCommentLines);
+                analyzer.analyzeFolder(folderPath);
+                languageStats = analyzer.getLanguageStatistics();
+                overallStats = analyzer.getOverallStatistics();
                 return null;
             }
             
             @Override
             protected void done() {
-                // 关闭进度对话框
                 progressDialog.dispose();
-                tempFrame.dispose();
                 
-                // 检查是否有错误
-                if (error != null) {
-                    JOptionPane.showMessageDialog(null,
-                        "分析过程中出现错误:\n" + error.getMessage(),
-                        "错误",
-                        JOptionPane.ERROR_MESSAGE);
-                    System.exit(1);
-                    return;
-                }
-                
-                // 检查是否找到了函数
-                if (statistics.totalFunctions == 0) {
-                    int result = JOptionPane.showConfirmDialog(null,
-                        "没有在指定文件夹中找到任何C语言函数。\n" +
-                        "可能的原因:\n" +
-                        "1. 文件夹中没有.c或.h文件\n" +
-                        "2. 文件中没有符合C语言规范的函数定义\n\n" +
-                        "是否要重新选择文件夹?",
-                        "未找到函数",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.WARNING_MESSAGE);
+                try {
+                    get(); // 检查是否有异常
                     
-                    if (result == JOptionPane.YES_OPTION) {
-                        startApplication(); // 重新开始
+                    int totalFunctions = (Integer) overallStats.get("totalFunctions");
+                    int totalSourceFiles = (Integer) overallStats.get("totalSourceFiles");
+                    
+                    if (totalSourceFiles == 0) {
+                        int choice = JOptionPane.showConfirmDialog(
+                            null,
+                            "没有在指定文件夹中找到任何支持的源代码文件。\n\n" +
+                            "支持的语言：C/C++/Java/Python/C#\n" +
+                            "支持的文件扩展名：.c .h .cpp .java .py .cs 等\n\n" +
+                            "可能的原因：\n" +
+                            "1. 文件夹中没有支持的源代码文件\n" +
+                            "2. 文件编码问题导致无法读取\n\n" +
+                            "是否退出程序？",
+                            "未找到源代码文件",
+                            JOptionPane.YES_NO_OPTION,
+                            JOptionPane.WARNING_MESSAGE
+                        );
+                        
+                        if (choice == JOptionPane.YES_OPTION) {
+                            System.exit(0);
+                        } else {
+                            // 重新开始
+                            startApplication();
+                        }
                     } else {
-                        System.exit(0);
+                        // 显示多语言统计结果
+                        MultiLanguageStatisticsFrame frame = new MultiLanguageStatisticsFrame(
+                            analyzer, languageStats, overallStats, exportFormat);
+                        frame.setVisible(true);
                     }
-                    return;
+                    
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(
+                        null,
+                        "分析过程中发生错误：\n" + e.getMessage(),
+                        "错误",
+                        JOptionPane.ERROR_MESSAGE
+                    );
+                    e.printStackTrace();
                 }
+                // 已在上面处理结果显示
                 
-                // 显示结果窗口
-                StatisticsFrame frame = new StatisticsFrame(analyzer, statistics);
-                frame.setVisible(true);
-                
-                // 在控制台也输出一份统计结果
-                System.out.println("\n" + statistics.getSummary());
-                System.out.println(statistics.getHealthAdvice());
+                // 在控制台输出总体统计摘要
+                if (overallStats != null) {
+                    System.out.println("\n================ 总体统计 ================");
+                    System.out.println("源文件: " + overallStats.get("totalSourceFiles")
+                        + ", 总行: " + overallStats.get("totalLines")
+                        + ", 代码: " + overallStats.get("totalCodeLines")
+                        + ", 空行: " + overallStats.get("totalEmptyLines")
+                        + ", 注释: " + overallStats.get("totalCommentLines")
+                        + ", 函数: " + overallStats.get("totalFunctions"));
+                    System.out.println("========================================\n");
+                }
             }
         };
         

@@ -14,9 +14,9 @@ public class CFunctionAnalyzer {
     // 用于匹配C语言函数定义的正则表达式
     // 这个表达式能识别类似 "int main()" 或 "void func(int a, int b)" 这样的函数定义
     private static final Pattern FUNCTION_PATTERN = Pattern.compile(
-        "^\\s*(?:static\\s+)?(?:inline\\s+)?(?:const\\s+)?(?:unsigned\\s+)?(?:signed\\s+)?" +
-        "(?:void|int|char|short|long|float|double|bool|struct\\s+\\w+|\\w+\\s*\\*+)\\s+" +
-        "(\\w+)\\s*\\([^)]*\\)\\s*\\{",
+        "^\\s*(?:extern\\s+)?(?:static\\s+)?(?:inline\\s+)?(?:const\\s+)?(?:unsigned\\s+|signed\\s+)?"
+        + "(?:(?:long\\s+long|long\\s+double)|long|short|void|int|char|float|double|bool|size_t|u?int\\d+_t|struct\\s+\\w+|[A-Za-z_][A-Za-z0-9_]*\\s*(?:\\*+)?)\\s+"
+        + "([A-Za-z_][A-Za-z0-9_]*)\\s*\\([^;{}]*\\)\\s*\\{",
         Pattern.MULTILINE
     );
     
@@ -86,9 +86,27 @@ public class CFunctionAnalyzer {
      * 分析单个C语言文件
      */
     private void analyzeFile(Path filePath) throws IOException {
-        String content = Files.readString(filePath);
+        String content;
+        try {
+            // 优先按UTF-8读取（Java默认），便于跨平台
+            content = Files.readString(filePath);
+        } catch (java.nio.charset.MalformedInputException e) {
+            // 若文件为本地系统编码（如Windows中文环境下的GBK），则回退到系统默认编码
+            try {
+                content = Files.readString(filePath, java.nio.charset.Charset.defaultCharset());
+            } catch (java.nio.charset.MalformedInputException e2) {
+                // 再次回退尝试GBK（常见于中文Windows）
+                try {
+                    content = Files.readString(filePath, java.nio.charset.Charset.forName("GBK"));
+                } catch (Exception e3) {
+                    // 仍失败则抛出最初的异常信息
+                    throw e;
+                }
+            }
+        }
         String fileName = filePath.getFileName().toString();
-        String[] lines = content.split("\n");
+        // 使用通用换行分隔符匹配，兼容\r\n/\n
+        String[] lines = content.split("\\R");
         
         // 使用正则表达式找出所有函数
         Matcher matcher = FUNCTION_PATTERN.matcher(content);
