@@ -1,0 +1,1386 @@
+package Game0_12;
+
+import javax.imageio.ImageIO;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.geom.Arc2D;
+import java.io.*;
+import java.net.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import javax.sound.sampled.*;
+import org.json.JSONObject;
+
+/**
+ * 综合功能实现：唐老鸭抢红包+换装+对话+代码统计
+ */
+public class GameFrame extends Frame {
+    // 游戏常量
+    public static final int WIDTH = 600;
+    public static final int HEIGHT = 600;
+    public static final int GAME_TIME = 30000;
+
+    // 界面状态枚举（仅保留抢红包游戏界面）
+    private enum UIState {
+        RED_PACKET_GAME  // 抢红包游戏界面
+    }
+
+    // 游戏元素
+    private DonaldDuck donald;  // 主唐老鸭
+    private List<LittleDuck> littleDucks = new ArrayList<>();  // 三只小鸭子
+    private List<RedPacket> redPackets = new ArrayList<>();
+    private GameTimer gameTimer;
+    private int totalAmount = 0;
+    private boolean isGameOver = false;
+    public boolean isGameOver() {
+        return isGameOver;
+    }
+
+    private UIState currentState = UIState.RED_PACKET_GAME;  // 直接进入抢红包界面
+
+    // 资源图片
+    private Image bgImg;
+    private Image donaldImg;
+    private Image littleDuckImg;
+    private Image redPacketImg;
+
+    // 换装系统相关
+    private Duck dressedDuck = new DonaldDuckDecorator();  // 装饰器模式的唐老鸭
+    private String currentStyle = "默认装扮";
+
+    // 行为和叫声定义
+    private BehaviorStrategy[] behaviors;
+    private String[] quacks = {
+            "嘎嘎嘎~",
+            "嘎嘎~优雅地叫一声~",
+            "嘎嘎嘎！好开心呀！",
+            "嘎？嘎嘎嘎？（搞怪叫声）"
+    };
+
+    // 新增：当前显示的叫声文字和显示时间（用于界面实时显示）
+    private String currentQuackText = "";
+    private long quackShowStartTime = 0;
+    private static final long QUACK_SHOW_DURATION = 2000;  // 文字显示时长（2秒）
+
+    // 线程池用于处理声音和飞行移动
+    private ExecutorService executor = Executors.newCachedThreadPool();
+
+    // AI对话配置
+    private static final String DASHSCOPE_API_KEY = "sk-80093b52b4124e43bac0e5e18188560b";
+    private static final String DASHSCOPE_API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
+    private static final String QWEN_MODEL = "qwen-turbo";
+
+    public GameFrame() {
+        loadResources();
+        initFrame();
+        // 初始化行为策略（传入唐老鸭引用）
+        behaviors = new BehaviorStrategy[]{
+                new FlyAndGlideBehavior(this),
+                new FlyFastBehavior(this),
+                new FlyAndShakeBehavior(this)
+        };
+        initGame();  // 直接初始化游戏，进入抢红包界面
+        setVisible(true);
+    }
+
+    // 提供唐老鸭对象的访问方法
+    public DonaldDuck getDonaldDuck() {
+        return donald;
+    }
+
+    // 提供游戏窗口边界检查
+    public boolean isWithinBounds(int x, int y) {
+        return x >= 0 && x <= WIDTH - (donald != null ? donald.getWidth() : 0) &&
+                y >= 0 && y <= HEIGHT - (donald != null ? donald.getHeight() : 0);
+    }
+
+    // 加载游戏资源
+    private void loadResources() {
+        try {
+            bgImg = loadImage("/images/R-C.jpg");
+            donaldImg = loadImage("/images/duck.jpg");
+            littleDuckImg = loadImage("/images/duck.jpg");
+            redPacketImg = loadImage("/images/redpacket.png");
+        } catch (Exception e) {
+            System.err.println("资源加载失败: " + e.getMessage());
+        }
+    }
+
+    private Image loadImage(String imagePath) {
+        URL url = getClass().getResource(imagePath);
+        if (url != null) {
+            try {
+                return ImageIO.read(url);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        System.err.println("无法加载图片: " + imagePath);
+        return null;
+    }
+
+    // 初始化游戏元素
+    private void initGame() {
+        // 重置游戏状态
+        totalAmount = 0;
+        isGameOver = false;
+        redPackets.clear();
+        littleDucks.clear();
+        currentQuackText = "";  // 重置叫声文字
+
+        // 停止之前的计时器（防止多线程冲突）
+        if (gameTimer != null && gameTimer.isAlive()) {
+            gameTimer.interrupt();
+        }
+
+        // 主唐老鸭初始化
+        donald = new DonaldDuck(WIDTH / 2 - 30, HEIGHT - 100, 60, 60, 5);
+
+        // 三只小鸭子固定在底部
+        int baseY = HEIGHT - 80;
+        int spacing = WIDTH / 4;
+        for (int i = 0; i < 3; i++) {
+            int x = spacing * (i + 1) - 20;
+            littleDucks.add(new LittleDuck(x, baseY, 40, 40, 0));
+        }
+
+        // 生成初始红包
+        spawnInitialRedPackets();
+
+        // 初始化计时器
+        gameTimer = new GameTimer(GAME_TIME, () -> isGameOver = true);
+        gameTimer.start();
+
+        // 启动游戏线程（如果未启动）
+        if (Thread.activeCount() < 5) {  // 简单判断避免重复启动
+            new PaintThread().start();
+            new RedPacketSpawner().start();
+        }
+    }
+
+    // 重置游戏（再来一次）
+    private void resetGame() {
+        initGame();
+        repaint();
+    }
+
+    // 生成初始红包（进入抢红包界面时立即显示）
+    private void spawnInitialRedPackets() {
+        Random random = new Random();
+        for (int i = 0; i < 8; i++) {
+            int x = random.nextInt(WIDTH - 50);
+            RedPacket.Shape shape = RedPacket.Shape.values()[random.nextInt(RedPacket.Shape.values().length)];
+            RedPacket.Size size = RedPacket.Size.values()[random.nextInt(RedPacket.Size.values().length)];
+            int sizeValue = size == RedPacket.Size.SMALL ? 20 : size == RedPacket.Size.MEDIUM ? 30 : 40;
+            redPackets.add(new RedPacket(x, random.nextInt(250), sizeValue, sizeValue, 2 + random.nextInt(3), shape, size));
+        }
+    }
+
+    // 初始化窗口和事件
+    private void initFrame() {
+        setTitle("唐老鸭综合游戏 0.12");
+        setSize(WIDTH, HEIGHT);
+        setLocationRelativeTo(null);
+        setResizable(false);
+        setLayout(null);
+
+        // 窗口关闭事件
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                executor.shutdownNow();
+                System.exit(0);
+            }
+        });
+
+        // 键盘事件（抢红包界面生效）
+        addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (isGameOver) return;
+
+                // 方向键控制移动
+                donald.handleKeyPress(e.getKeyCode());
+
+                // Z键随机叫声（带声音+文字对应）
+                if (e.getKeyCode() == KeyEvent.VK_Z) {
+                    playRandomQuack();
+                }
+
+                // X键随机飞行（带真实移动）
+                if (e.getKeyCode() == KeyEvent.VK_X) {
+                    performRandomFly();
+                }
+            }
+
+            @Override
+            public void keyReleased(KeyEvent e) {
+                if (isGameOver) return;
+                donald.handleKeyRelease(e.getKeyCode());
+            }
+        });
+
+        // 鼠标点击事件（抢红包界面点击唐老鸭/再来一次按钮）
+        addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                // 游戏结束时点击"再来一次"按钮
+                if (isGameOver) {
+                    if (isPointInButton(e.getX(), e.getY(), WIDTH/2 - 100, HEIGHT/2 + 130, 200, 60)) {
+                        resetGame();  // 重置游戏
+                    }
+                    return;
+                }
+
+                // 抢红包界面：点击唐老鸭弹出功能对话框
+                if (donald != null && donald.isClicked(e.getX(), e.getY())) {
+                    showFunctionDialog();
+                }
+            }
+        });
+    }
+
+    // 判断鼠标是否点击在按钮区域
+    private boolean isPointInButton(int x, int y, int btnX, int btnY, int btnWidth, int btnHeight) {
+        return x >= btnX && x <= btnX + btnWidth && y >= btnY && y <= btnY + btnHeight;
+    }
+
+    // 功能对话框：点击唐老鸭后弹出，支持所有指令
+    private void showFunctionDialog() {
+        String input = JOptionPane.showInputDialog(
+                this,
+                "请输入指令：\n- 换装 → 进入换装系统\n- 红包雨 → 触发红包雨\n- 代码统计 → 查看统计数据\n- 其他内容 → 与唐老鸭对话",
+                "唐老鸭功能交互",
+                JOptionPane.QUESTION_MESSAGE
+        );
+        if (input != null && !input.trim().isEmpty()) {
+            handleUserInput(input.trim());
+        }
+    }
+
+    // 处理用户输入指令
+    private void handleUserInput(String input) {
+        input = input.toLowerCase().trim();
+
+        // 1. 换装功能
+        if (input.contains("换装")) {
+            showDressUpDialog();
+            return;
+        }
+
+        // 2. 红包雨功能
+        if (input.contains("红包雨")) {
+            JOptionPane.showMessageDialog(this, "红包雨来啦！超多红包掉落～", "红包雨特效", JOptionPane.INFORMATION_MESSAGE);
+            spawnRedPacketRain();
+            return;
+        }
+
+        // 3. 代码统计功能
+        if (input.contains("代码统计")) {
+            new CodeStatsFrame(this);  // 传入游戏主窗口引用
+            return;
+        }
+
+        // 4. AI对话功能
+        final String userInput = input;
+        new Thread(() -> {
+            try {
+                String aiResponse = getQwenResponse(userInput);
+                SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(GameFrame.this, aiResponse, "唐老鸭的回复", JOptionPane.INFORMATION_MESSAGE)
+                );
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(GameFrame.this, "对话失败：" + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE)
+                );
+            }
+        }).start();
+    }
+
+    // 换装对话框（支持返回抢红包界面）
+    private void showDressUpDialog() {
+        JDialog dressUpDialog = new JDialog(this, "唐老鸭换装系统", true);
+        dressUpDialog.setSize(500, 400);
+        dressUpDialog.setLocationRelativeTo(this);
+        dressUpDialog.setLayout(new BorderLayout());
+
+        // 风格选择面板
+        JPanel stylePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 60));
+
+        Button formalBtn = new Button("正式风格");
+        Button sportBtn = new Button("运动风格");
+        Button mixedBtn = new Button("混搭风格");
+
+        formalBtn.setPreferredSize(new Dimension(100, 40));
+        sportBtn.setPreferredSize(new Dimension(100, 40));
+        mixedBtn.setPreferredSize(new Dimension(100, 40));
+
+        // 正式风格：礼帽+墨镜+丝绸围巾+领带+名表
+        formalBtn.addActionListener(e -> {
+            dressedDuck = new LuxuryWatch(new Tie(new SilkScarf(new Sunglasses(new TopHat(new DonaldDuckDecorator())))));
+            currentStyle = "正式风格";
+            JOptionPane.showMessageDialog(this, "装扮完成：" + dressedDuck.getDescription(), "换装成功", JOptionPane.INFORMATION_MESSAGE);
+            dressUpDialog.dispose();
+            repaint();  // 刷新界面显示新装扮
+        });
+
+        // 运动风格：棒球帽+运动眼镜+运动毛巾+运动手表
+        sportBtn.addActionListener(e -> {
+            dressedDuck = new SportWatch(new SportTowel(new SportGlasses(new BaseballCap(new DonaldDuckDecorator()))));
+            currentStyle = "运动风格";
+            JOptionPane.showMessageDialog(this, "装扮完成：" + dressedDuck.getDescription(), "换装成功", JOptionPane.INFORMATION_MESSAGE);
+            dressUpDialog.dispose();
+            repaint();
+        });
+
+        // 混搭风格：棒球帽+墨镜+运动毛巾+领带+名表
+        mixedBtn.addActionListener(e -> {
+            dressedDuck = new LuxuryWatch(new Tie(new SportTowel(new Sunglasses(new BaseballCap(new DonaldDuckDecorator())))));
+            currentStyle = "混搭风格";
+            JOptionPane.showMessageDialog(this, "装扮完成：" + dressedDuck.getDescription(), "换装成功", JOptionPane.INFORMATION_MESSAGE);
+            dressUpDialog.dispose();
+            repaint();
+        });
+
+        stylePanel.add(formalBtn);
+        stylePanel.add(sportBtn);
+        stylePanel.add(mixedBtn);
+
+        // 底部返回按钮（明确返回抢红包界面）
+        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 20, 20));
+        Button backBtn = new Button("返回抢红包界面");
+        backBtn.addActionListener(e -> dressUpDialog.dispose());
+        bottomPanel.add(backBtn);
+
+        dressUpDialog.add(stylePanel, BorderLayout.CENTER);
+        dressUpDialog.add(bottomPanel, BorderLayout.SOUTH);
+        dressUpDialog.setVisible(true);
+    }
+
+    // 红包雨效果
+    private void spawnRedPacketRain() {
+        Random random = new Random();
+        for (int i = 0; i < 30; i++) {
+            int x = random.nextInt(WIDTH - 50);
+            RedPacket.Shape shape = RedPacket.Shape.values()[random.nextInt(RedPacket.Shape.values().length)];
+            RedPacket.Size size = RedPacket.Size.values()[random.nextInt(RedPacket.Size.values().length)];
+            int sizeValue = size == RedPacket.Size.SMALL ? 20 : size == RedPacket.Size.MEDIUM ? 30 : 40;
+            redPackets.add(new RedPacket(x, 0, sizeValue, sizeValue, 3 + random.nextInt(4), shape, size));
+        }
+    }
+
+    // Z键：随机叫声（声音与文字精准对应+界面实时显示）
+    private void playRandomQuack() {
+        Random random = new Random();
+        int quackIndex = random.nextInt(quacks.length);
+        currentQuackText = quacks[quackIndex];  // 设置当前叫声文字
+        quackShowStartTime = System.currentTimeMillis();  // 记录显示开始时间
+
+        // 显示对话框（可选，保留原有功能）
+        JOptionPane.showMessageDialog(this, currentQuackText, "唐老鸭叫啦", JOptionPane.INFORMATION_MESSAGE);
+
+        // 在独立线程中播放声音，避免阻塞UI
+        executor.submit(() -> {
+            try {
+                // 优化：声音与文字精准匹配，调整频率、时长、间隔
+                switch (quackIndex) {
+                    case 0: // 嘎嘎嘎~ 短而快的三声（模拟"嘎-嘎-嘎"）
+                        SoundUtils.playTone(850, 120, 0.4f);  // 第一声"嘎"
+                        Thread.sleep(80);  // 短间隔
+                        SoundUtils.playTone(900, 120, 0.4f);  // 第二声"嘎"
+                        Thread.sleep(80);  // 短间隔
+                        SoundUtils.playTone(870, 150, 0.4f);  // 第三声"嘎"（稍长）
+                        break;
+                    case 1: // 嘎嘎~优雅地叫一声~ 长而柔和（模拟"嘎~嘎~~~~"）
+                        SoundUtils.playTone(720, 200, 0.3f);  // 第一声"嘎"（短）
+                        Thread.sleep(100);
+                        SoundUtils.playTone(750, 600, 0.25f); // 第二声"嘎"（长而柔和）
+                        break;
+                    case 2: // 嘎嘎嘎！好开心呀！ 高而响亮（模拟"嘎！嘎！嘎！"）
+                        SoundUtils.playTone(1050, 180, 0.5f); // 第一声"嘎"（高）
+                        Thread.sleep(100);
+                        SoundUtils.playTone(1100, 180, 0.5f); // 第二声"嘎"（更高）
+                        Thread.sleep(100);
+                        SoundUtils.playTone(1150, 220, 0.55f); // 第三声"嘎"（最高最响）
+                        break;
+                    case 3: // 嘎？嘎嘎嘎？（搞怪叫声） 高低交替（模拟"嘎？嘎-嘎-嘎？"）
+                        SoundUtils.playTone(650, 200, 0.35f);  // 第一声"嘎？"（低而疑惑）
+                        Thread.sleep(150);  // 长间隔
+                        SoundUtils.playTone(950, 120, 0.4f);  // 第二声"嘎"（高）
+                        Thread.sleep(70);
+                        SoundUtils.playTone(850, 120, 0.4f);  // 第三声"嘎"（中）
+                        Thread.sleep(70);
+                        SoundUtils.playTone(1000, 180, 0.4f); // 第四声"嘎？"（高而疑惑）
+                        break;
+                }
+            } catch (Exception e) {
+                System.err.println("播放声音失败: " + e.getMessage());
+            }
+        });
+    }
+
+    // X键：随机飞行行为（带真实移动）
+    private void performRandomFly() {
+        if (donald == null || isGameOver) return;
+
+        Random random = new Random();
+        BehaviorStrategy behavior = behaviors[random.nextInt(behaviors.length)];
+
+        // 在独立线程中执行飞行行为，避免阻塞UI
+        executor.submit(() -> {
+            behavior.perform();
+        });
+    }
+
+    // 绘图线程
+    class PaintThread extends Thread {
+        @Override
+        public void run() {
+            while (true) {
+                if (!isGameOver) {
+                    updateGame();
+                    // 检查叫声文字是否过期
+                    if (!currentQuackText.isEmpty() &&
+                            System.currentTimeMillis() - quackShowStartTime > QUACK_SHOW_DURATION) {
+                        currentQuackText = "";  // 过期后清空
+                    }
+                }
+                repaint();
+                try {
+                    Thread.sleep(40);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    // 红包生成线程
+    class RedPacketSpawner extends Thread {
+        private Random random = new Random();
+
+        @Override
+        public void run() {
+            while (!isGameOver) {
+                int x = random.nextInt(WIDTH - 50);
+                RedPacket.Shape shape = RedPacket.Shape.values()[random.nextInt(RedPacket.Shape.values().length)];
+                RedPacket.Size size = RedPacket.Size.values()[random.nextInt(RedPacket.Size.values().length)];
+                int sizeValue = size == RedPacket.Size.SMALL ? 20 : size == RedPacket.Size.MEDIUM ? 30 : 40;
+                int speed = 2 + (4 - size.ordinal()) * 2;
+                redPackets.add(new RedPacket(x, 0, sizeValue, sizeValue, speed, shape, size));
+
+                try {
+                    Thread.sleep(800 + random.nextInt(1200));
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    // 更新游戏状态
+    private void updateGame() {
+        if (donald == null) return;
+
+        donald.updatePosition();
+
+        List<RedPacket> toRemove = new ArrayList<>();
+        for (RedPacket rp : redPackets) {
+            rp.updatePosition();
+            if (rp.getY() > HEIGHT) {
+                toRemove.add(rp);
+            } else if (donald.collidesWith(rp)) {
+                totalAmount += rp.getAmount();
+                toRemove.add(rp);
+            }
+        }
+        redPackets.removeAll(toRemove);
+    }
+
+    // 绘图方法（仅绘制抢红包游戏界面）
+    @Override
+    public void paint(Graphics g) {
+        // 绘制背景
+        if (bgImg != null) {
+            g.drawImage(bgImg, 0, 0, WIDTH, HEIGHT, null);
+        } else {
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, WIDTH, HEIGHT);
+        }
+
+        // 绘制抢红包游戏界面
+        drawRedPacketGame(g);
+    }
+
+    // 绘制抢红包游戏界面
+    private void drawRedPacketGame(Graphics g) {
+        // 绘制主唐老鸭（带装扮）
+        if (donald != null) {
+            drawDressedDonald(g);
+        }
+
+        // 绘制小鸭子
+        for (LittleDuck duck : littleDucks) {
+            if (littleDuckImg != null) {
+                g.drawImage(littleDuckImg, duck.getX(), duck.getY(), duck.getWidth(), duck.getHeight(), null);
+            } else {
+                g.setColor(Color.YELLOW);
+                g.fillOval(duck.getX(), duck.getY(), duck.getWidth(), duck.getHeight());
+            }
+        }
+
+        // 绘制红包
+        for (RedPacket rp : redPackets) {
+            if (redPacketImg != null && rp.getShape() == RedPacket.Shape.RECTANGLE) {
+                g.drawImage(redPacketImg, rp.getX(), rp.getY(), rp.getWidth(), rp.getHeight(), null);
+            } else {
+                rp.draw(g, null);
+            }
+        }
+
+        // 绘制游戏信息
+        g.setColor(Color.BLACK);
+        g.setFont(new Font("宋体", Font.PLAIN, 16));
+        g.drawString("总金额: " + totalAmount + "元", 20, 30);
+        g.drawString("剩余时间: " + (gameTimer != null ? gameTimer.getRemainingTime() / 1000 : 0) + "秒", 20, 50);
+        g.drawString("当前装扮: " + currentStyle, 20, 70);
+        g.drawString("操作：方向键移动 | Z键叫（带声音） | X键飞（真实移动） | 点击唐老鸭打开功能", 20, 90);
+
+        // 新增：绘制当前叫声文字（悬浮在唐老鸭上方）
+        if (!currentQuackText.isEmpty() && donald != null) {
+            g.setColor(new Color(255, 0, 0, 220));  // 红色半透明
+            g.setFont(new Font("宋体", Font.BOLD, 24));
+            // 文字位置：唐老鸭上方居中
+            int textX = donald.getX() + donald.getWidth()/2 - g.getFontMetrics().stringWidth(currentQuackText)/2;
+            int textY = donald.getY() - 30;
+            g.drawString(currentQuackText, textX, textY);
+        }
+
+        // 游戏结束（显示结果和再来一次按钮）
+        if (isGameOver) {
+            g.setColor(new Color(255, 0, 0, 180));
+            g.fillRect(0, 0, WIDTH, HEIGHT);
+
+            g.setColor(Color.WHITE);
+            g.setFont(new Font("宋体", Font.BOLD, 40));
+            g.drawString("游戏结束", WIDTH / 2 - 120, HEIGHT / 2);
+            g.drawString("最终金额: " + totalAmount + "元", WIDTH / 2 - 180, HEIGHT / 2 + 50);
+
+            // 绘制"再来一次"按钮
+            int btnX = WIDTH/2 - 100;
+            int btnY = HEIGHT/2 + 130;
+            int btnWidth = 200;
+            int btnHeight = 60;
+
+            g.setColor(new Color(255, 215, 0));
+            g.fillRoundRect(btnX, btnY, btnWidth, btnHeight, 20, 20);
+
+            g.setColor(Color.RED);
+            g.setFont(new Font("宋体", Font.BOLD, 24));
+            g.drawString("再来一次", btnX + 50, btnY + 35);
+        }
+    }
+
+    // 绘制带装扮的唐老鸭
+    private void drawDressedDonald(Graphics g) {
+        int x = donald.getX();
+        int y = donald.getY();
+        int width = donald.getWidth();
+        int height = donald.getHeight();
+
+        // 绘制基础唐老鸭
+        if (donaldImg != null) {
+            g.drawImage(donaldImg, x, y, width, height, null);
+        } else {
+            g.setColor(Color.YELLOW);
+            g.fillOval(x, y, width, height);
+        }
+
+        // 绘制装扮
+        Graphics2D g2d = (Graphics2D) g;
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        String desc = dressedDuck.getDescription();
+
+        // 帽子
+        if (desc.contains("礼帽")) {
+            drawTopHat(g2d, x + width/2, y - 10);
+        } else if (desc.contains("棒球帽")) {
+            drawBaseballCap(g2d, x + width/2, y - 5);
+        }
+
+        // 眼镜
+        if (desc.contains("墨镜")) {
+            drawSunglasses(g2d, x + width/2, y + height/4);
+        } else if (desc.contains("运动眼镜")) {
+            drawSportGlasses(g2d, x + width/2, y + height/4);
+        }
+
+        // 围巾/毛巾
+        if (desc.contains("丝绸围巾")) {
+            drawSilkScarf(g2d, x + width/2, y + height/2);
+        } else if (desc.contains("运动毛巾")) {
+            drawSportTowel(g2d, x + width/2, y + height/2);
+        }
+
+        // 领带
+        if (desc.contains("领带")) {
+            drawTie(g2d, x + width/2, y + height/2);
+        }
+
+        // 手表
+        if (desc.contains("名表")) {
+            drawLuxuryWatch(g2d, x + width - 15, y + height/3);
+        } else if (desc.contains("运动手表")) {
+            drawSportWatch(g2d, x + width - 15, y + height/3);
+        }
+    }
+
+    // 装扮绘制方法
+    private void drawTopHat(Graphics2D g, int x, int y) {
+        g.setColor(Color.BLACK);
+        g.fillRect(x - 15, y - 30, 30, 20);
+        g.fillOval(x - 22, y - 10, 44, 10);
+    }
+
+    private void drawBaseballCap(Graphics2D g, int x, int y) {
+        g.setColor(new Color(255, 69, 0));
+        g.fillArc(x - 20, y - 25, 40, 30, 0, 180);
+        g.fillRect(x - 25, y - 5, 30, 5);
+    }
+
+    private void drawSunglasses(Graphics2D g, int x, int y) {
+        g.setColor(Color.BLACK);
+        g.fillOval(x - 20, y - 10, 15, 10);
+        g.fillOval(x + 5, y - 10, 15, 10);
+        g.drawLine(x - 5, y - 5, x + 5, y - 5);
+    }
+
+    private void drawSportGlasses(Graphics2D g, int x, int y) {
+        g.setColor(new Color(0, 191, 255));
+        g.drawOval(x - 20, y - 10, 15, 10);
+        g.drawOval(x + 5, y - 10, 15, 10);
+        g.drawLine(x - 5, y - 5, x + 5, y - 5);
+    }
+
+    private void drawSilkScarf(Graphics2D g, int x, int y) {
+        g.setColor(new Color(255, 20, 147));
+        g.fillArc(x - 30, y, 60, 20, 0, 180);
+    }
+
+    private void drawSportTowel(Graphics2D g, int x, int y) {
+        g.setColor(new Color(50, 205, 50));
+        g.fillArc(x - 30, y, 60, 20, 0, 180);
+    }
+
+    private void drawTie(Graphics2D g, int x, int y) {
+        g.setColor(Color.RED);
+        int[] xPoints = {x, x - 10, x - 5, x - 10, x + 10, x + 5, x + 10};
+        int[] yPoints = {y, y + 10, y + 20, y + 40, y + 40, y + 20, y + 10};
+        g.fillPolygon(xPoints, yPoints, 7);
+    }
+
+    private void drawLuxuryWatch(Graphics2D g, int x, int y) {
+        g.setColor(Color.YELLOW);
+        g.fillOval(x - 8, y - 8, 16, 16);
+        g.setColor(Color.BLACK);
+        g.drawOval(x - 8, y - 8, 16, 16);
+    }
+
+    private void drawSportWatch(Graphics2D g, int x, int y) {
+        g.setColor(Color.GRAY);
+        g.fillOval(x - 8, y - 8, 16, 16);
+        g.setColor(Color.BLACK);
+        g.drawOval(x - 8, y - 8, 16, 16);
+    }
+
+    // 双缓冲解决闪烁
+    private Image offScreenImage;
+    @Override
+    public void update(Graphics g) {
+        if (offScreenImage == null) {
+            offScreenImage = createImage(WIDTH, HEIGHT);
+        }
+        Graphics gOff = offScreenImage.getGraphics();
+        paint(gOff);
+        g.drawImage(offScreenImage, 0, 0, null);
+    }
+
+    // AI对话工具方法
+    private String getQwenResponse(String input) throws Exception {
+        URL url = new URL(DASHSCOPE_API_URL);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("POST");
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Authorization", "Bearer " + DASHSCOPE_API_KEY);
+        connection.setDoOutput(true);
+
+        JSONObject requestBody = new JSONObject();
+        requestBody.put("model", QWEN_MODEL);
+        JSONObject inputObj = new JSONObject();
+        inputObj.put("prompt", input);
+        requestBody.put("input", inputObj);
+
+        // 添加必要的参数（避免API调用失败）
+        requestBody.put("parameters", new JSONObject().put("result_format", "text"));
+
+        try (OutputStream os = connection.getOutputStream()) {
+            byte[] inputBytes = requestBody.toString().getBytes("utf-8");
+            os.write(inputBytes, 0, inputBytes.length);
+        }
+
+        // 处理响应
+        int responseCode = connection.getResponseCode();
+        if (responseCode != 200) {
+            // 读取错误信息
+            BufferedReader errorBr = new BufferedReader(new InputStreamReader(connection.getErrorStream(), "utf-8"));
+            StringBuilder errorMsg = new StringBuilder();
+            String line;
+            while ((line = errorBr.readLine()) != null) {
+                errorMsg.append(line);
+            }
+            throw new Exception("API调用失败，状态码：" + responseCode + "，错误信息：" + errorMsg);
+        }
+
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(connection.getInputStream(), "utf-8"))) {
+            StringBuilder response = new StringBuilder();
+            String responseLine;
+            while ((responseLine = br.readLine()) != null) {
+                response.append(responseLine.trim());
+            }
+            return new JSONObject(response.toString()).getJSONObject("output").getString("text");
+        }
+    }
+
+    // 主方法
+    public static void main(String[] args) {
+        // 确保在EDT线程中启动GUI
+        SwingUtilities.invokeLater(GameFrame::new);
+    }
+}
+
+// 声音工具类：生成电子合成声音（新增音量控制）
+class SoundUtils {
+    // 音频格式
+    private static final AudioFormat AUDIO_FORMAT = new AudioFormat(
+            AudioFormat.Encoding.PCM_SIGNED,
+            44100,
+            16,
+            2,
+            4,
+            44100,
+            false
+    );
+
+    // 播放指定频率、时长和音量的音调（新增音量参数）
+    public static void playTone(int frequency, int durationMs, float volume) throws LineUnavailableException, InterruptedException {
+        if (volume < 0 || volume > 1) volume = 0.3f;  // 音量范围限制（0-1）
+
+        SourceDataLine line = AudioSystem.getSourceDataLine(AUDIO_FORMAT);
+        line.open(AUDIO_FORMAT, 44100);
+        line.start();
+
+        int sampleRate = (int) AUDIO_FORMAT.getSampleRate();
+        int numSamples = sampleRate * durationMs / 1000;
+        byte[] buffer = new byte[numSamples * 4]; // 16位 * 2声道 = 4字节/样本
+
+        // 生成正弦波（根据音量调整振幅）
+        for (int i = 0; i < numSamples; i++) {
+            double angle = 2.0 * Math.PI * frequency * i / sampleRate;
+            short value = (short) (Math.sin(angle) * 32767 * volume); // 音量控制
+
+            // 写入左右声道
+            buffer[4 * i] = (byte) (value & 0xFF);
+            buffer[4 * i + 1] = (byte) ((value >> 8) & 0xFF);
+            buffer[4 * i + 2] = (byte) (value & 0xFF);
+            buffer[4 * i + 3] = (byte) ((value >> 8) & 0xFF);
+        }
+
+        line.write(buffer, 0, buffer.length);
+        line.drain();
+        line.stop();
+        line.close();
+    }
+
+    // 兼容旧方法（默认音量0.3）
+    public static void playTone(int frequency, int durationMs) throws LineUnavailableException, InterruptedException {
+        playTone(frequency, durationMs, 0.3f);
+    }
+}
+
+// 游戏对象基类
+abstract class GameObject {
+    protected int x, y;
+    protected int width, height;
+
+    public GameObject(int x, int y, int width, int height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+    }
+
+    public int getX() { return x; }
+    public int getY() { return y; }
+    public int getWidth() { return width; }
+    public int getHeight() { return height; }
+
+    public void setX(int x) { this.x = x; }
+    public void setY(int y) { this.y = y; }
+
+    public boolean collidesWith(GameObject other) {
+        return x < other.x + other.width &&
+                x + width > other.x &&
+                y < other.y + other.height &&
+                y + height > other.y;
+    }
+
+    public abstract void draw(Graphics g, Image img);
+    public abstract void updatePosition();
+}
+
+// 唐老鸭类（游戏角色）
+class DonaldDuck extends GameObject {
+    private int speed;
+    private boolean left, right, up, down;
+
+    public DonaldDuck(int x, int y, int width, int height, int speed) {
+        super(x, y, width, height);
+        this.speed = speed;
+    }
+
+    public void handleKeyPress(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.VK_LEFT: left = true; break;
+            case KeyEvent.VK_RIGHT: right = true; break;
+            case KeyEvent.VK_UP: up = true; break;
+            case KeyEvent.VK_DOWN: down = true; break;
+        }
+    }
+
+    public void handleKeyRelease(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.VK_LEFT: left = false; break;
+            case KeyEvent.VK_RIGHT: right = false; break;
+            case KeyEvent.VK_UP: up = false; break;
+            case KeyEvent.VK_DOWN: down = false; break;
+        }
+    }
+
+    public boolean isClicked(int x, int y) {
+        return x >= this.x && x <= this.x + width &&
+                y >= this.y && y <= this.y + height;
+    }
+
+    // 飞行移动方法：直接设置位置
+    public void flyTo(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    // 平滑飞行移动：逐步移动到目标位置
+    public void smoothFlyTo(int targetX, int targetY, int steps, int delayMs) throws InterruptedException {
+        int startX = this.x;
+        int startY = this.y;
+        int dx = (targetX - startX) / steps;
+        int dy = (targetY - startY) / steps;
+
+        for (int i = 0; i < steps; i++) {
+            this.x += dx;
+            this.y += dy;
+            Thread.sleep(delayMs);
+        }
+
+        // 确保准确到达目标位置
+        this.x = targetX;
+        this.y = targetY;
+    }
+
+    @Override
+    public void updatePosition() {
+        if (left && x > 0) x -= speed;
+        if (right && x < GameFrame.WIDTH - width) x += speed;
+        if (up && y > 0) y -= speed;
+        if (down && y < GameFrame.HEIGHT - height) y += speed;
+    }
+
+    @Override
+    public void draw(Graphics g, Image img) {
+        if (img != null) {
+            g.drawImage(img, x, y, width, height, null);
+        } else {
+            g.setColor(Color.YELLOW);
+            g.fillOval(x, y, width, height);
+        }
+    }
+}
+
+// 小鸭子类
+class LittleDuck extends GameObject {
+    private int speed;
+
+    public LittleDuck(int x, int y, int width, int height, int speed) {
+        super(x, y, width, height);
+        this.speed = speed;
+    }
+
+    @Override
+    public void updatePosition() {
+        // 保持不动（speed=0）
+    }
+
+    @Override
+    public void draw(Graphics g, Image img) {
+        if (img != null) {
+            g.drawImage(img, x, y, width, height, null);
+        } else {
+            g.setColor(Color.YELLOW);
+            g.fillOval(x, y, width, height);
+        }
+    }
+}
+
+// 红包类
+class RedPacket extends GameObject {
+    public enum Shape { RECTANGLE, CIRCLE, TRIANGLE }
+    public enum Size { SMALL, MEDIUM, LARGE }
+
+    private int speed;
+    private Shape shape;
+    private Size size;
+    private int amount;
+
+    public RedPacket(int x, int y, int width, int height, int speed, Shape shape, Size size) {
+        super(x, y, width, height);
+        this.speed = speed;
+        this.shape = shape;
+        this.size = size;
+        this.amount = calculateAmount();
+    }
+
+    private int calculateAmount() {
+        switch (size) {
+            case SMALL: return 1 + new Random().nextInt(4);
+            case MEDIUM: return 5 + new Random().nextInt(10);
+            case LARGE: return 15 + new Random().nextInt(15);
+            default: return 1;
+        }
+    }
+
+    public int getAmount() { return amount; }
+    public Shape getShape() { return shape; }
+
+    @Override
+    public void updatePosition() {
+        y += speed;
+    }
+
+    @Override
+    public void draw(Graphics g, Image img) {
+        g.setColor(Color.RED);
+        switch (shape) {
+            case RECTANGLE:
+                g.fillRect(x, y, width, height);
+                break;
+            case CIRCLE:
+                g.fillOval(x, y, width, height);
+                break;
+            case TRIANGLE:
+                int[] xPoints = {x + width/2, x, x + width};
+                int[] yPoints = {y, y + height, y + height};
+                g.fillPolygon(xPoints, yPoints, 3);
+                break;
+        }
+        g.setColor(Color.YELLOW);
+        g.drawString(String.valueOf(amount), x + width/2 - 5, y + height/2 + 5);
+    }
+}
+
+// 游戏计时器
+class GameTimer extends Thread {
+    private int totalTime;
+    private int remainingTime;
+    private Runnable onFinish;
+
+    public GameTimer(int totalTime, Runnable onFinish) {
+        this.totalTime = totalTime;
+        this.remainingTime = totalTime;
+        this.onFinish = onFinish;
+    }
+
+    public int getRemainingTime() {
+        return remainingTime;
+    }
+
+    @Override
+    public void run() {
+        try {
+            while (remainingTime > 0) {
+                Thread.sleep(1000);
+                remainingTime -= 1000;
+            }
+            onFinish.run();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+// 行为策略接口（支持真实移动）
+interface BehaviorStrategy { void perform(); }
+
+// 滑翔飞行：向前滑翔一段距离
+class FlyAndGlideBehavior implements BehaviorStrategy {
+    private GameFrame gameFrame;
+    private Random random = new Random();
+
+    public FlyAndGlideBehavior(GameFrame gameFrame) {
+        this.gameFrame = gameFrame;
+    }
+
+    @Override
+    public void perform() {
+        DonaldDuck donald = gameFrame.getDonaldDuck();
+        if (donald == null || gameFrame.isGameOver()) return;
+
+        // 显示对话框
+        SwingUtilities.invokeLater(() ->
+                JOptionPane.showMessageDialog(null, "唐老鸭起飞然后滑翔~", "飞行行为", JOptionPane.INFORMATION_MESSAGE)
+        );
+
+        try {
+            // 生成随机飞行方向（主要向前，左右略有偏移）
+            int currentX = donald.getX();
+            int currentY = donald.getY();
+
+            // 向上滑翔（Y轴减少），X轴随机偏移
+            int offsetX = random.nextInt(150) - 75; // -75到75之间的偏移
+            int targetX = currentX + offsetX;
+            int targetY = currentY - 200; // 向上滑翔200像素
+
+            // 边界检查
+            if (targetX < 0) targetX = 0;
+            if (targetX > GameFrame.WIDTH - donald.getWidth()) {
+                targetX = GameFrame.WIDTH - donald.getWidth();
+            }
+            if (targetY < 0) targetY = 0;
+
+            // 平滑飞行（30步，每步10毫秒）
+            donald.smoothFlyTo(targetX, targetY, 30, 10);
+
+            // 滑翔后缓慢下落
+            Thread.sleep(500);
+            donald.smoothFlyTo(targetX, Math.min(targetY + 100, GameFrame.HEIGHT - donald.getHeight()), 20, 15);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("滑翔飞行失败: " + e.getMessage());
+        }
+    }
+}
+
+// 快速飞行：快速向前飞行一段距离
+class FlyFastBehavior implements BehaviorStrategy {
+    private GameFrame gameFrame;
+    private Random random = new Random();
+
+    public FlyFastBehavior(GameFrame gameFrame) {
+        this.gameFrame = gameFrame;
+    }
+
+    @Override
+    public void perform() {
+        DonaldDuck donald = gameFrame.getDonaldDuck();
+        if (donald == null || gameFrame.isGameOver()) return;
+
+        // 显示对话框
+        SwingUtilities.invokeLater(() ->
+                JOptionPane.showMessageDialog(null, "唐老鸭起飞然后快速飞行！", "飞行行为", JOptionPane.INFORMATION_MESSAGE)
+        );
+
+        try {
+            // 快速向前飞行，方向更稳定
+            int currentX = donald.getX();
+            int currentY = donald.getY();
+
+            // 主要向上飞行，X轴偏移较小
+            int offsetX = random.nextInt(100) - 50;
+            int targetX = currentX + offsetX;
+            int targetY = currentY - 300; // 向上快速飞行300像素
+
+            // 边界检查
+            if (targetX < 0) targetX = 0;
+            if (targetX > GameFrame.WIDTH - donald.getWidth()) {
+                targetX = GameFrame.WIDTH - donald.getWidth();
+            }
+            if (targetY < 0) targetY = 0;
+
+            // 快速飞行（20步，每步5毫秒）
+            donald.smoothFlyTo(targetX, targetY, 20, 5);
+
+            // 飞行后短暂停留再缓慢下落
+            Thread.sleep(300);
+            donald.smoothFlyTo(targetX, Math.min(targetY + 150, GameFrame.HEIGHT - donald.getHeight()), 25, 12);
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("快速飞行失败: " + e.getMessage());
+        }
+    }
+}
+
+// 摇晃飞行：一边摇晃一边滑翔
+class FlyAndShakeBehavior implements BehaviorStrategy {
+    private GameFrame gameFrame;
+    private Random random = new Random();
+
+    public FlyAndShakeBehavior(GameFrame gameFrame) {
+        this.gameFrame = gameFrame;
+    }
+
+    @Override
+    public void perform() {
+        DonaldDuck donald = gameFrame.getDonaldDuck();
+        if (donald == null || gameFrame.isGameOver()) return;
+
+        // 显示对话框
+        SwingUtilities.invokeLater(() ->
+                JOptionPane.showMessageDialog(null, "唐老鸭起飞然后一边晃一边滑翔~", "飞行行为", JOptionPane.INFORMATION_MESSAGE)
+        );
+
+        try {
+            int currentX = donald.getX();
+            int currentY = donald.getY();
+            int targetX = currentX + random.nextInt(200) - 100;
+            int targetY = currentY - 250;
+
+            // 边界检查
+            if (targetX < 0) targetX = 0;
+            if (targetX > GameFrame.WIDTH - donald.getWidth()) {
+                targetX = GameFrame.WIDTH - donald.getWidth();
+            }
+            if (targetY < 0) targetY = 0;
+
+            // 摇晃飞行：左右摆动着前进
+            int steps = 40;
+            int dxTotal = targetX - currentX;
+            int dyTotal = targetY - currentY;
+
+            for (int i = 0; i < steps; i++) {
+                // 基础移动
+                int xStep = dxTotal / steps;
+                int yStep = dyTotal / steps;
+
+                // 摇晃偏移（正弦曲线）
+                int shakeOffset = (int) (Math.sin(i * 0.3) * 15);
+
+                donald.setX(donald.getX() + xStep + shakeOffset);
+                donald.setY(donald.getY() + yStep);
+
+                // 确保不超出边界
+                if (donald.getX() < 0) donald.setX(0);
+                if (donald.getX() > GameFrame.WIDTH - donald.getWidth()) {
+                    donald.setX(GameFrame.WIDTH - donald.getWidth());
+                }
+
+                Thread.sleep(8);
+            }
+
+            // 最终调整到目标位置
+            donald.setX(targetX);
+            donald.setY(targetY);
+
+            // 摇晃下落
+            Thread.sleep(400);
+            for (int i = 0; i < 30; i++) {
+                int shakeOffset = (int) (Math.sin(i * 0.4) * 10);
+                donald.setX(targetX + shakeOffset);
+                donald.setY(donald.getY() + 5);
+
+                if (donald.getY() > GameFrame.HEIGHT - donald.getHeight()) {
+                    donald.setY(GameFrame.HEIGHT - donald.getHeight());
+                    break;
+                }
+
+                Thread.sleep(10);
+            }
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("摇晃飞行失败: " + e.getMessage());
+        }
+    }
+}
+
+// 装饰器模式：唐老鸭换装
+interface Duck {
+    String getDescription();
+}
+
+class DonaldDuckDecorator implements Duck {
+    @Override
+    public String getDescription() {
+        return "基础唐老鸭";
+    }
+}
+
+abstract class DuckDecorator implements Duck {
+    protected Duck duck;
+    public DuckDecorator(Duck duck) { this.duck = duck; }
+    @Override
+    public String getDescription() { return duck.getDescription(); }
+}
+
+class TopHat extends DuckDecorator {
+    public TopHat(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 礼帽"; }
+}
+
+class BaseballCap extends DuckDecorator {
+    public BaseballCap(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 棒球帽"; }
+}
+
+class Sunglasses extends DuckDecorator {
+    public Sunglasses(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 墨镜"; }
+}
+
+class SportGlasses extends DuckDecorator {
+    public SportGlasses(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 运动眼镜"; }
+}
+
+class SilkScarf extends DuckDecorator {
+    public SilkScarf(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 丝绸围巾"; }
+}
+
+class SportTowel extends DuckDecorator {
+    public SportTowel(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 运动毛巾"; }
+}
+
+class Tie extends DuckDecorator {
+    public Tie(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 领带"; }
+}
+
+class LuxuryWatch extends DuckDecorator {
+    public LuxuryWatch(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 名表"; }
+}
+
+class SportWatch extends DuckDecorator {
+    public SportWatch(Duck duck) { super(duck); }
+    @Override
+    public String getDescription() { return duck.getDescription() + " + 运动手表"; }
+}
+
+// 代码统计界面（支持返回抢红包界面）
+class CodeStatsFrame extends JFrame {
+    private GameFrame gameFrame;
+
+    public CodeStatsFrame(GameFrame gameFrame) {
+        this.gameFrame = gameFrame;
+        setTitle("代码统计分析器");
+        setSize(800, 600);
+        setLocationRelativeTo(gameFrame);
+        setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+
+        JTabbedPane tabbedPane = new JTabbedPane();
+
+        // 柱状图面板
+        JPanel barChartPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.drawString("代码量柱状图展示", 300, 50);
+                drawBarChart(g);
+            }
+        };
+
+        // 饼图面板
+        JPanel pieChartPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                g.drawString("代码量占比饼图", 300, 50);
+                drawPieChart(g);
+            }
+        };
+
+        // 详细数据面板
+        JPanel dataPanel = new JPanel();
+        dataPanel.setLayout(new BoxLayout(dataPanel, BoxLayout.Y_AXIS));
+        dataPanel.add(new JLabel("=== 代码统计详情 ==="));
+        dataPanel.add(new JLabel("总文件数: 3366"));
+        dataPanel.add(new JLabel("总代码量: 506,426 行"));
+        dataPanel.add(new JLabel("Python占比: 74.81%"));
+        dataPanel.add(new JLabel("Python函数数: 15,037 个"));
+        dataPanel.add(new JLabel("Python函数平均长度: 12.64 行"));
+
+        tabbedPane.addTab("柱状图", barChartPanel);
+        tabbedPane.addTab("饼图", pieChartPanel);
+        tabbedPane.addTab("详细数据", dataPanel);
+
+        // 底部返回按钮（返回抢红包界面）
+        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 20, 20));
+        JButton backBtn = new JButton("返回抢红包界面");
+        backBtn.addActionListener(e -> dispose()); // 关闭当前窗口，返回游戏主界面
+        bottomPanel.add(backBtn);
+
+        // 添加组件
+        getContentPane().setLayout(new BorderLayout());
+        getContentPane().add(tabbedPane, BorderLayout.CENTER);
+        getContentPane().add(bottomPanel, BorderLayout.SOUTH);
+
+        setVisible(true);
+    }
+
+    private void drawBarChart(Graphics g) {
+        int[] data = {506, 120, 80, 50, 30};
+        String[] labels = {"Python", "Java", "C++", "JavaScript", "Others"};
+        int x = 100;
+        int y = 400;
+        int barWidth = 60;
+        int maxHeight = 300;
+
+        for (int i = 0; i < data.length; i++) {
+            int barHeight = (int)(data[i] * maxHeight / 600.0);
+            g.setColor(new Color(100 + i*30, 100, 255 - i*30));
+            g.fillRect(x, y - barHeight, barWidth, barHeight);
+            g.setColor(Color.BLACK);
+            g.drawString(labels[i], x, y + 20);
+            x += 100;
+        }
+    }
+
+    private void drawPieChart(Graphics g) {
+        int centerX = 400;
+        int centerY = 300;
+        int radius = 150;
+        float[] angles = {74.8f, 12.5f, 8.2f, 3.5f, 1.0f};
+        Color[] colors = {Color.RED, Color.BLUE, Color.GREEN, Color.YELLOW, Color.ORANGE};
+        float startAngle = 0;
+
+        for (int i = 0; i < angles.length; i++) {
+            g.setColor(colors[i]);
+            g.fillArc(centerX - radius, centerY - radius, radius*2, radius*2,
+                    (int)startAngle, (int)angles[i]);
+            startAngle += angles[i];
+        }
+    }
+}
