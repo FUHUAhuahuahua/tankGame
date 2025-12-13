@@ -4,6 +4,7 @@ import javax.imageio.ImageIO;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.geom.Arc2D;
 import java.io.*;
 import java.net.*;
 import java.util.ArrayList;
@@ -47,12 +48,14 @@ public class GameFrame extends Frame {
     private Image littleDuckImg;
     private Image redPacketImg;
     
-    // 换装风格图片
-    private Image sportStyleImg;    // 运动风格图片
-    private Image formalStyleImg;   // 正式风格图片
-    private Image mixedStyleImg;    // 混搭风格图片
+    // 换装系统图片
+    private Image donaldSportImg;    // 运动风格图片
+    private Image donaldFormalImg;   // 正式风格图片
+    private Image donaldMixedImg;    // 混搭风格图片
+    private Image currentDonaldImg;  // 当前使用的唐老鸭图片
 
     // 换装系统相关
+    private Duck dressedDuck = new DonaldDuckDecorator();  // 装饰器模式的唐老鸭
     private String currentStyle = "默认装扮";
 
     // 行为和叫声定义
@@ -111,10 +114,13 @@ public class GameFrame extends Frame {
             littleDuckImg = loadImage("/images/duck.jpg");
             redPacketImg = loadImage("/images/redpacket.png");
             
-            // 加载换装风格图片
-            sportStyleImg = loadImage("/images/yd_style.jpeg");
-            formalStyleImg = loadImage("/images/zs_style.jpeg");
-            mixedStyleImg = loadImage("/images/hd_style.jpeg");
+            // 加载换装图片
+            donaldSportImg = loadImage("/images/yd_style.jpeg");   // 运动风格
+            donaldFormalImg = loadImage("/images/zs_style.jpeg");  // 正式风格
+            donaldMixedImg = loadImage("/images/hd_style.jpeg");   // 混搭风格
+            
+            // 默认使用基础图片
+            currentDonaldImg = donaldImg;
         } catch (Exception e) {
             System.err.println("资源加载失败: " + e.getMessage());
         }
@@ -148,7 +154,7 @@ public class GameFrame extends Frame {
         }
 
         // 主唐老鸭初始化
-        donald = new DonaldDuck(WIDTH / 2 - 30, HEIGHT - 150, 60, 60, 5);
+        donald = new DonaldDuck(WIDTH / 2 - 30, HEIGHT - 100, 60, 60, 5);
 
         // 三只小鸭子固定在底部
         int baseY = HEIGHT - 80;
@@ -174,7 +180,6 @@ public class GameFrame extends Frame {
 
     // 重置游戏（再来一次）
     private void resetGame() {
-        currentStyle = "默认装扮";  // 重置装扮为默认
         initGame();
         repaint();
     }
@@ -327,49 +332,41 @@ public class GameFrame extends Frame {
         // 风格选择面板
         JPanel stylePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 30, 60));
 
-        Button defaultBtn = new Button("默认装扮");
         Button formalBtn = new Button("正式风格");
         Button sportBtn = new Button("运动风格");
         Button mixedBtn = new Button("混搭风格");
 
-        defaultBtn.setPreferredSize(new Dimension(100, 40));
         formalBtn.setPreferredSize(new Dimension(100, 40));
         sportBtn.setPreferredSize(new Dimension(100, 40));
         mixedBtn.setPreferredSize(new Dimension(100, 40));
 
-        // 默认装扮
-        defaultBtn.addActionListener(e -> {
-            currentStyle = "默认装扮";
-            JOptionPane.showMessageDialog(this, "装扮完成：默认装扮", "换装成功", JOptionPane.INFORMATION_MESSAGE);
-            dressUpDialog.dispose();
-            repaint();  // 刷新界面显示新装扮
-        });
-
-        // 正式风格
+        // 正式风格：使用正式风格图片
         formalBtn.addActionListener(e -> {
+            currentDonaldImg = donaldFormalImg;
             currentStyle = "正式风格";
-            JOptionPane.showMessageDialog(this, "装扮完成：正式风格 - 礼帽+墨镜+丝绸围巾+领带+名表", "换装成功", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "装扮完成：正式风格 - 西装革履，气质优雅！", "换装成功", JOptionPane.INFORMATION_MESSAGE);
             dressUpDialog.dispose();
             repaint();  // 刷新界面显示新装扮
         });
 
-        // 运动风格
+        // 运动风格：使用运动风格图片
         sportBtn.addActionListener(e -> {
+            currentDonaldImg = donaldSportImg;
             currentStyle = "运动风格";
-            JOptionPane.showMessageDialog(this, "装扮完成：运动风格 - 棒球帽+运动眼镜+运动毛巾+运动手表", "换装成功", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "装扮完成：运动风格 - 活力四射，充满能量！", "换装成功", JOptionPane.INFORMATION_MESSAGE);
             dressUpDialog.dispose();
             repaint();
         });
 
-        // 混搭风格
+        // 混搭风格：使用混搭风格图片
         mixedBtn.addActionListener(e -> {
+            currentDonaldImg = donaldMixedImg;
             currentStyle = "混搭风格";
-            JOptionPane.showMessageDialog(this, "装扮完成：混搭风格 - 棒球帽+墨镜+运动毛巾+领带+名表", "换装成功", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "装扮完成：混搭风格 - 个性十足，独一无二！", "换装成功", JOptionPane.INFORMATION_MESSAGE);
             dressUpDialog.dispose();
             repaint();
         });
 
-        stylePanel.add(defaultBtn);
         stylePanel.add(formalBtn);
         stylePanel.add(sportBtn);
         stylePanel.add(mixedBtn);
@@ -604,9 +601,71 @@ public class GameFrame extends Frame {
             g.fillRoundRect(btnX, btnY, btnWidth, btnHeight, 20, 20);
 
             g.setColor(Color.RED);
-            g.setFont(new Font("宋体", Font.BOLD, 24));
-            g.drawString("再来一次", btnX + 50, btnY + 35);
+    }
+
+    // 绘制小鸭子
+    for (LittleDuck duck : littleDucks) {
+        if (littleDuckImg != null) {
+            g.drawImage(littleDuckImg, duck.getX(), duck.getY(), duck.getWidth(), duck.getHeight(), null);
+        } else {
+            g.setColor(Color.YELLOW);
+            g.fillOval(duck.getX(), duck.getY(), duck.getWidth(), duck.getHeight());
         }
+    }
+
+    // 绘制红包
+    for (RedPacket rp : redPackets) {
+        if (redPacketImg != null && rp.getShape() == RedPacket.Shape.RECTANGLE) {
+            g.drawImage(redPacketImg, rp.getX(), rp.getY(), rp.getWidth(), rp.getHeight(), null);
+        } else {
+            rp.draw(g, null);
+        }
+        g.fillRect(x - 25, y - 5, 30, 5);
+    }
+
+    private void drawSunglasses(Graphics2D g, int x, int y) {
+        g.setColor(Color.BLACK);
+        g.fillOval(x - 20, y - 10, 15, 10);
+        g.fillOval(x + 5, y - 10, 15, 10);
+        g.drawLine(x - 5, y - 5, x + 5, y - 5);
+    }
+
+    private void drawSportGlasses(Graphics2D g, int x, int y) {
+        g.setColor(new Color(0, 191, 255));
+        g.drawOval(x - 20, y - 10, 15, 10);
+        g.drawOval(x + 5, y - 10, 15, 10);
+        g.drawLine(x - 5, y - 5, x + 5, y - 5);
+    }
+
+    private void drawSilkScarf(Graphics2D g, int x, int y) {
+        g.setColor(new Color(255, 20, 147));
+        g.fillArc(x - 30, y, 60, 20, 0, 180);
+    }
+
+    private void drawSportTowel(Graphics2D g, int x, int y) {
+        g.setColor(new Color(50, 205, 50));
+        g.fillArc(x - 30, y, 60, 20, 0, 180);
+    }
+
+    private void drawTie(Graphics2D g, int x, int y) {
+        g.setColor(Color.RED);
+        int[] xPoints = {x, x - 10, x - 5, x - 10, x + 10, x + 5, x + 10};
+        int[] yPoints = {y, y + 10, y + 20, y + 40, y + 40, y + 20, y + 10};
+        g.fillPolygon(xPoints, yPoints, 7);
+    }
+
+    private void drawLuxuryWatch(Graphics2D g, int x, int y) {
+        g.setColor(Color.YELLOW);
+        g.fillOval(x - 8, y - 8, 16, 16);
+        g.setColor(Color.BLACK);
+        g.drawOval(x - 8, y - 8, 16, 16);
+    }
+
+    private void drawSportWatch(Graphics2D g, int x, int y) {
+        g.setColor(Color.GRAY);
+        g.fillOval(x - 8, y - 8, 16, 16);
+        g.setColor(Color.BLACK);
+        g.drawOval(x - 8, y - 8, 16, 16);
     }
 
     // 双缓冲解决闪烁
@@ -665,37 +724,6 @@ public class GameFrame extends Frame {
                 response.append(responseLine.trim());
             }
             return new JSONObject(response.toString()).getJSONObject("output").getString("text");
-        }
-    }
-
-    // 绘制带装扮的唐老鸭（新版本：使用风格图片）
-    private void drawDressedDonald(Graphics g) {
-        int x = donald.getX();
-        int y = donald.getY();
-        int width = donald.getWidth();
-        int height = donald.getHeight();
-
-        // 根据当前风格选择要绘制的图片
-        Image imageToDraw = null;
-        
-        if (currentStyle.equals("运动风格") && sportStyleImg != null) {
-            imageToDraw = sportStyleImg;
-        } else if (currentStyle.equals("正式风格") && formalStyleImg != null) {
-            imageToDraw = formalStyleImg;
-        } else if (currentStyle.equals("混搭风格") && mixedStyleImg != null) {
-            imageToDraw = mixedStyleImg;
-        } else {
-            // 默认装扮，使用原始唐老鸭图片
-            imageToDraw = donaldImg;
-        }
-
-        // 绘制选定的图片
-        if (imageToDraw != null) {
-            g.drawImage(imageToDraw, x, y, width, height, null);
-        } else {
-            // 如果没有图片，画一个黄色圆形代替
-            g.setColor(Color.YELLOW);
-            g.fillOval(x, y, width, height);
         }
     }
 
