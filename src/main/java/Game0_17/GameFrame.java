@@ -42,8 +42,8 @@ public class GameFrame extends Frame {
     private double amountMultiplier = 1.0;
 
     public static final String DB_URL = "jdbc:mysql://localhost:3306/duck_game?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true";
-    public static final String DB_USER = "root";
-    public static final String DB_PASSWORD = "thedangerinmyheart";
+    public static final String DB_USER = "duckgame";
+    public static final String DB_PASSWORD = "DuckGame@2024!";
 
     private Button startBtn, funcBtn;
 
@@ -383,6 +383,11 @@ public class GameFrame extends Frame {
             for (String name : new String[]{"唐小哥", "唐老二", "唐小弟"}) {
                 stmt.execute("INSERT IGNORE INTO skill_stats (duck_name) VALUES ('" + name + "')");
             }
+            // 创建套装购买记录表
+            stmt.execute("CREATE TABLE IF NOT EXISTS suit_purchases (" +
+                    "suit_name VARCHAR(50) PRIMARY KEY, " +
+                    "is_purchased BOOLEAN DEFAULT FALSE, " +
+                    "purchase_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         } catch (SQLException e) { System.err.println("数据库初始化失败: " + e.getMessage()); }
     }
 
