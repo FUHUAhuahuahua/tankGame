@@ -12,7 +12,7 @@ import java.sql.*;
  */
 public class SkillSystem extends Frame {
 
-    // ★ 使用 GameFrame 的数据库配置（如果可用），否则使用本地配置
+
     private String dbUrl;
     private String dbUser;
     private String dbPassword;
@@ -22,26 +22,20 @@ public class SkillSystem extends Frame {
     private JLabel totalCallLabel;
     private JLabel usageRateLabel;
 
-    // 游戏引用（从游戏跳转时使用）
     private Frame gameFrame;
 
-    // 独立运行时的构造函数
     public SkillSystem() {
         this(null);
     }
 
-    // 从游戏跳转时的构造函数
     public SkillSystem(Frame gameFrame) {
         this.gameFrame = gameFrame;
 
-        // 设置数据库配置
         try {
-            // 尝试使用 GameFrame 的配置
             dbUrl = GameFrame.DB_URL;
             dbUser = GameFrame.DB_USER;
             dbPassword = GameFrame.DB_PASSWORD;
         } catch (NoClassDefFoundError e) {
-            // 独立运行时使用本地配置
             dbUrl = "jdbc:mysql://localhost:3306/duck_game?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true";
             dbUser = "root";
             dbPassword = "thedangerinmyheart";  // 改成你的密码
@@ -91,7 +85,7 @@ public class SkillSystem extends Frame {
             }
         });
 
-        // 顶部面板
+
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 5, 10));
 
@@ -110,7 +104,6 @@ public class SkillSystem extends Frame {
 
         add(headerPanel, BorderLayout.NORTH);
 
-        // 表格
         String[] columns = {"唐小鸭", "技能", "点名次数", "使用次数", "未使用次数", "使用率"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
@@ -125,7 +118,6 @@ public class SkillSystem extends Frame {
         scrollPane.setBorder(BorderFactory.createTitledBorder("技能使用统计"));
         add(scrollPane, BorderLayout.CENTER);
 
-        // 底部按钮
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
 
         JButton refreshBtn = new JButton("刷新数据");
@@ -148,7 +140,7 @@ public class SkillSystem extends Frame {
 
         add(buttonPanel, BorderLayout.SOUTH);
 
-        // 右侧技能说明
+
         JPanel infoPanel = new JPanel();
         infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.Y_AXIS));
         infoPanel.setBorder(BorderFactory.createTitledBorder("技能说明"));
@@ -226,7 +218,6 @@ public class SkillSystem extends Frame {
         }
     }
 
-    // ★ 返回游戏
     private void returnToGame() {
         this.dispose();  // 关闭当前窗口
         if (gameFrame != null) {
@@ -236,7 +227,7 @@ public class SkillSystem extends Frame {
         }
     }
 
-    // 独立运行入口
+
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             try {
