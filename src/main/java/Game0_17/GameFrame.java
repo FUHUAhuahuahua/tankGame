@@ -341,7 +341,6 @@ public class GameFrame extends Frame {
         }
     }
 
-    // ★ 修改：功能菜单新增AI对话选项
     private void showFunctionDialog() {
         String[] options = {"抢红包(当前)", "换装系统", "代码统计", "技能统计", "技能点名系统", "🤖 AI对话"};
         int choice = JOptionPane.showOptionDialog(this, "选择功能模块", "功能菜单",
@@ -368,7 +367,6 @@ public class GameFrame extends Frame {
         new SkillSystem(this);
     }
 
-    // ★ 新增：打开AI对话窗口
     private void openAIChatDialog() {
         new AIChatDialog(this, speechService);
     }
@@ -397,7 +395,6 @@ public class GameFrame extends Frame {
             for (String name : new String[]{"唐小哥", "唐老二", "唐小弟"}) {
                 stmt.execute("INSERT IGNORE INTO skill_stats (duck_name) VALUES ('" + name + "')");
             }
-            // 创建套装购买记录表
             stmt.execute("CREATE TABLE IF NOT EXISTS suit_purchases (" +
                     "suit_name VARCHAR(50) PRIMARY KEY, " +
                     "is_purchased BOOLEAN DEFAULT FALSE, " +
@@ -440,7 +437,6 @@ public class GameFrame extends Frame {
         } catch (SQLException e) { e.printStackTrace(); }
     }
 
-    // ==================== 绘图与更新 ====================
     class PaintThread extends Thread {
         public void run() {
             while (true) {
@@ -564,7 +560,6 @@ public class GameFrame extends Frame {
     }
 }
 
-// ==================== AI对话窗口 ====================
 class AIChatDialog extends JDialog {
     private static final String DASHSCOPE_API_KEY = "sk-80093b52b4124e43bac0e5e18188560b";
     private static final String DASHSCOPE_API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
@@ -642,7 +637,7 @@ class AIChatDialog extends JDialog {
         inputPanel.add(buttonPanel, BorderLayout.EAST);
         add(inputPanel, BorderLayout.SOUTH);
 
-        // 快捷问题面板
+
         JPanel quickPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
         quickPanel.setBorder(BorderFactory.createTitledBorder("快捷问题"));
         String[] quickQuestions = {"讲个笑话", "今日运势", "鼓励我一下", "你是谁"};
@@ -657,7 +652,7 @@ class AIChatDialog extends JDialog {
         }
         add(quickPanel, BorderLayout.SOUTH);
 
-        // 重新布局底部
+
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.add(quickPanel, BorderLayout.NORTH);
         bottomPanel.add(inputPanel, BorderLayout.SOUTH);
@@ -668,14 +663,14 @@ class AIChatDialog extends JDialog {
         String input = inputField.getText().trim();
         if (input.isEmpty()) return;
 
-        // 显示用户消息
+
         chatArea.append("👤 你: " + input + "\n\n");
         inputField.setText("");
         inputField.setEnabled(false);
         sendBtn.setEnabled(false);
         sendBtn.setText("思考中...");
 
-        // 异步调用API
+
         new Thread(() -> {
             try {
                 String response = getQwenResponse(input);
@@ -709,7 +704,7 @@ class AIChatDialog extends JDialog {
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(60000);
 
-        // 构建请求JSON（手动拼接，避免依赖org.json）
+
         String systemPrompt = "你是唐老鸭AI助手，你必须自称'唐老鸭AI助手'，绝对不能说自己是通义千问或其他AI。你的性格活泼可爱，说话带点幽默，偶尔会用鸭子的口吻说话（比如'嘎嘎'）。你在一个抢红包游戏中陪伴玩家聊天。";
         String requestBody = String.format(
                 "{\"model\":\"%s\",\"input\":{\"messages\":[" +
@@ -735,19 +730,19 @@ class AIChatDialog extends JDialog {
             throw new Exception("API错误(" + responseCode + "): " + errorMsg);
         }
 
-        // 读取响应
+
         try (BufferedReader br = new BufferedReader(
                 new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
             StringBuilder response = new StringBuilder();
             String line;
             while ((line = br.readLine()) != null) response.append(line);
 
-            // 简单解析JSON提取回复内容
+
             return parseQwenResponse(response.toString());
         }
     }
 
-    // 解析通义千问响应
+
     private String parseQwenResponse(String json) {
         try {
             // 查找 "content":" 后的内容
@@ -770,7 +765,7 @@ class AIChatDialog extends JDialog {
         }
     }
 
-    // 找到JSON字符串的结束位置（处理转义）
+
     private int findJsonStringEnd(String json, int start) {
         for (int i = start; i < json.length(); i++) {
             if (json.charAt(i) == '\\') {
@@ -782,7 +777,6 @@ class AIChatDialog extends JDialog {
         return json.length();
     }
 
-    // JSON转义
     private String escapeJson(String s) {
         return s.replace("\\", "\\\\")
                 .replace("\"", "\\\"")
@@ -791,7 +785,7 @@ class AIChatDialog extends JDialog {
                 .replace("\t", "\\t");
     }
 
-    // JSON反转义
+
     private String unescapeJson(String s) {
         return s.replace("\\n", "\n")
                 .replace("\\r", "\r")
@@ -802,7 +796,6 @@ class AIChatDialog extends JDialog {
 
     private void speakLastResponse() {
         if (!lastResponse.isEmpty()) {
-            // 截取前100字符朗读
             String toSpeak = lastResponse.length() > 100 ?
                     lastResponse.substring(0, 100) + "..." : lastResponse;
             speechService.speak(toSpeak);
@@ -815,7 +808,6 @@ class AIChatDialog extends JDialog {
     }
 }
 
-// ==================== 其他类保持不变 ====================
 enum DebuffType {
     REVERSE_WORLD("颠倒世界", "左右颠倒", new Color(128, 0, 128, 50)),
     NO_FLY("飞行无力", "无法飞行", new Color(100, 100, 100, 50)),
