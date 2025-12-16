@@ -42,8 +42,8 @@ public class GameFrame extends Frame {
     private double amountMultiplier = 1.0;
 
     public static final String DB_URL = "jdbc:mysql://localhost:3306/duck_game?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true";
-    public static final String DB_USER = "duckgame";
-    public static final String DB_PASSWORD = "DuckGame@2024!";
+    public static final String DB_USER = "root";
+    public static final String DB_PASSWORD = "thedangerinmyheart";
 
     private Button startBtn, funcBtn;
 
@@ -102,7 +102,7 @@ public class GameFrame extends Frame {
         try {
             bgImg = loadImage("/images/R-C.jpg");
             donaldImg = loadImage("/images/duck.jpg");
-            littleDuckImg = loadImage("/images/duck.jpg");
+            littleDuckImg = loadImage("/images/little_duck.png");
             redPacketImg = loadImage("/images/redpacket.png");
         } catch (Exception e) {
             System.err.println("资源加载失败: " + e.getMessage());
@@ -222,13 +222,27 @@ public class GameFrame extends Frame {
 
         int choice = JOptionPane.showConfirmDialog(this,
                 "点到了【" + selectedDuck.getName() + "】！\n技能：" + selectedDuck.getSkill().getDescription() +
-                        "\n\n是否使用该技能？", "技能选择", JOptionPane.YES_NO_OPTION);
+                        "\n\n是否花费50元使用该技能？", "技能选择", JOptionPane.YES_NO_OPTION);
 
         if (choice == JOptionPane.YES_OPTION) {
-            activeSkill = selectedDuck.getSkill();
-            applySkill(activeSkill);
-            recordSkillUsed(selectedDuck.getName(), true);
-            speechService.speak("技能已激活，" + activeSkill.getDescription());
+            if (totalAmount >= 50) {
+                // 金额足够，扣除50元
+                totalAmount -= 50;
+                updateTotalAmountInDB(); // 更新数据库中的金额
+
+                activeSkill = selectedDuck.getSkill();
+                applySkill(activeSkill);
+                recordSkillUsed(selectedDuck.getName(), true);
+                speechService.speak("技能已激活，" + activeSkill.getDescription() + "，消耗50元");
+            } else {
+                // 金额不足，提示并取消技能使用
+                JOptionPane.showMessageDialog(this,
+                        "金额不足，请积累足够基金再使用该技能",
+                        "提示", JOptionPane.WARNING_MESSAGE);
+                activeSkill = null;
+                recordSkillUsed(selectedDuck.getName(), false);
+                speechService.speak("金额不足，无法使用技能");
+            }
         } else {
             activeSkill = null;
             recordSkillUsed(selectedDuck.getName(), false);
