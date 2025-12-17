@@ -29,7 +29,8 @@ public class GameFrame extends Frame {
     private int totalAmount = 0;
     private int sessionAmount = 0;
 
-    private Image bgImg, donaldImg, littleDuckImg, redPacketImg;
+    private Image bgImg, donaldImg, littleDuckImg;
+    private Image redPacketSmallImg, redPacketMiddleImg, redPacketBigImg;
 
     private SkillType activeSkill = null;
     private LittleDuck selectedDuck = null;
@@ -80,10 +81,9 @@ public class GameFrame extends Frame {
         Random random = new Random();
         for (int i = 0; i < count; i++) {
             int x = random.nextInt(WIDTH - 50);
-            RedPacket.Shape shape = RedPacket.Shape.values()[random.nextInt(3)];
             RedPacket.Size size = RedPacket.Size.values()[random.nextInt(3)];
             int sizeValue = size == RedPacket.Size.SMALL ? 20 : size == RedPacket.Size.MEDIUM ? 30 : 40;
-            redPackets.add(new RedPacket(x, 0, sizeValue, sizeValue, 3 + random.nextInt(4), shape, size));
+            redPackets.add(new RedPacket(x, 0, sizeValue, sizeValue, 3 + random.nextInt(4), size));
         }
     }
 
@@ -103,7 +103,9 @@ public class GameFrame extends Frame {
             bgImg = loadImage("/images/R-C.jpg");
             donaldImg = loadImage("/images/duck.jpg");
             littleDuckImg = loadImage("/images/little_duck.png");
-            redPacketImg = loadImage("/images/redpacket.png");
+            redPacketSmallImg = loadImage("/images/redpacket.png");
+            redPacketMiddleImg = loadImage("/images/redpacket-middle.png");
+            redPacketBigImg = loadImage("/images/redpacket-big.png");
         } catch (Exception e) {
             System.err.println("资源加载失败: " + e.getMessage());
         }
@@ -226,16 +228,13 @@ public class GameFrame extends Frame {
 
         if (choice == JOptionPane.YES_OPTION) {
             if (totalAmount >= 50) {
-                // 金额足够，扣除50元
                 totalAmount -= 50;
-                updateTotalAmountInDB(); // 更新数据库中的金额
-
+                updateTotalAmountInDB();
                 activeSkill = selectedDuck.getSkill();
                 applySkill(activeSkill);
                 recordSkillUsed(selectedDuck.getName(), true);
                 speechService.speak("技能已激活，" + activeSkill.getDescription() + "，消耗50元");
             } else {
-                // 金额不足，提示并取消技能使用
                 JOptionPane.showMessageDialog(this,
                         "金额不足，请积累足够基金再使用该技能",
                         "提示", JOptionPane.WARNING_MESSAGE);
@@ -334,10 +333,9 @@ public class GameFrame extends Frame {
         Random random = new Random();
         for (int i = 0; i < 8; i++) {
             int x = random.nextInt(WIDTH - 50);
-            RedPacket.Shape shape = RedPacket.Shape.values()[random.nextInt(3)];
             RedPacket.Size size = RedPacket.Size.values()[random.nextInt(3)];
             int sizeValue = size == RedPacket.Size.SMALL ? 20 : size == RedPacket.Size.MEDIUM ? 30 : 40;
-            redPackets.add(new RedPacket(x, random.nextInt(200), sizeValue, sizeValue, 2 + random.nextInt(3), shape, size));
+            redPackets.add(new RedPacket(x, random.nextInt(200), sizeValue, sizeValue, 2 + random.nextInt(3), size));
         }
     }
 
@@ -358,7 +356,7 @@ public class GameFrame extends Frame {
                 break;
             case 3: new SkillStatsDialog(this); break;
             case 4: openSkillSystem(); break;
-            case 5: openAIChatDialog(); break;  // ★ 新增
+            case 5: openAIChatDialog(); break;
         }
     }
 
@@ -383,7 +381,16 @@ public class GameFrame extends Frame {
         return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
     }
 
-    // ==================== 数据库操作 ====================
+    private Image getRedPacketImage(RedPacket.Size size) {
+        switch (size) {
+            case SMALL: return redPacketSmallImg;
+            case MEDIUM: return redPacketMiddleImg;
+            case LARGE: return redPacketBigImg;
+            default: return redPacketSmallImg;
+        }
+    }
+
+
     private void initDatabase() {
         try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
              Statement stmt = conn.createStatement()) {
@@ -452,10 +459,9 @@ public class GameFrame extends Frame {
             Random random = new Random();
             while (gameState == GameState.PLAYING) {
                 int x = random.nextInt(WIDTH - 50);
-                RedPacket.Shape shape = RedPacket.Shape.values()[random.nextInt(3)];
                 RedPacket.Size size = RedPacket.Size.values()[random.nextInt(3)];
                 int sizeValue = size == RedPacket.Size.SMALL ? 20 : size == RedPacket.Size.MEDIUM ? 30 : 40;
-                redPackets.add(new RedPacket(x, 0, sizeValue, sizeValue, 2 + random.nextInt(3), shape, size));
+                redPackets.add(new RedPacket(x, 0, sizeValue, sizeValue, 2 + random.nextInt(3), size));
                 try { Thread.sleep(800 + random.nextInt(1000)); } catch (InterruptedException e) {}
             }
         }
@@ -504,7 +510,10 @@ public class GameFrame extends Frame {
             g.drawString(duck.getName(), duck.getX(), duck.getY() + duck.getHeight() + 15);
         }
 
-        for (RedPacket rp : redPackets) rp.draw(g, redPacketImg);
+        for (RedPacket rp : redPackets) {
+            Image img = getRedPacketImage(rp.getSize());
+            rp.draw(g, img);
+        }
 
         g.setColor(Color.BLACK);
         g.setFont(new Font("宋体", Font.BOLD, 16));
@@ -572,7 +581,7 @@ class AIChatDialog extends JDialog {
     private String lastResponse = "";
 
     public AIChatDialog(Frame parent, SpeechService speechService) {
-        super(parent, "🤖 唐老鸭AI助手", false);  // 非模态
+        super(parent, "🤖 唐老鸭AI助手", false);
         this.speechService = speechService;
         initUI();
         setVisible(true);
@@ -583,7 +592,6 @@ class AIChatDialog extends JDialog {
         setLocationRelativeTo(getParent());
         setLayout(new BorderLayout(10, 10));
 
-        // 顶部标题
         JPanel headerPanel = new JPanel();
         headerPanel.setBackground(new Color(70, 130, 180));
         JLabel titleLabel = new JLabel("🦆 唐老鸭AI助手 - 通义千问");
@@ -592,7 +600,6 @@ class AIChatDialog extends JDialog {
         headerPanel.add(titleLabel);
         add(headerPanel, BorderLayout.NORTH);
 
-        // 聊天区域
         chatArea = new JTextArea();
         chatArea.setEditable(false);
         chatArea.setLineWrap(true);
@@ -605,13 +612,12 @@ class AIChatDialog extends JDialog {
         scrollPane.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         add(scrollPane, BorderLayout.CENTER);
 
-        // 底部输入区域
         JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
         inputPanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 10, 10));
 
         inputField = new JTextField();
         inputField.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        inputField.addActionListener(e -> sendMessage());  // 回车发送
+        inputField.addActionListener(e -> sendMessage());
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
 
@@ -637,7 +643,6 @@ class AIChatDialog extends JDialog {
         inputPanel.add(buttonPanel, BorderLayout.EAST);
         add(inputPanel, BorderLayout.SOUTH);
 
-
         JPanel quickPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
         quickPanel.setBorder(BorderFactory.createTitledBorder("快捷问题"));
         String[] quickQuestions = {"讲个笑话", "今日运势", "鼓励我一下", "你是谁"};
@@ -652,7 +657,6 @@ class AIChatDialog extends JDialog {
         }
         add(quickPanel, BorderLayout.SOUTH);
 
-
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.add(quickPanel, BorderLayout.NORTH);
         bottomPanel.add(inputPanel, BorderLayout.SOUTH);
@@ -663,13 +667,11 @@ class AIChatDialog extends JDialog {
         String input = inputField.getText().trim();
         if (input.isEmpty()) return;
 
-
         chatArea.append("👤 你: " + input + "\n\n");
         inputField.setText("");
         inputField.setEnabled(false);
         sendBtn.setEnabled(false);
         sendBtn.setText("思考中...");
-
 
         new Thread(() -> {
             try {
@@ -704,7 +706,6 @@ class AIChatDialog extends JDialog {
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(60000);
 
-
         String systemPrompt = "你是唐老鸭AI助手，你必须自称'唐老鸭AI助手'，绝对不能说自己是通义千问或其他AI。你的性格活泼可爱，说话带点幽默，偶尔会用鸭子的口吻说话（比如'嘎嘎'）。你在一个抢红包游戏中陪伴玩家聊天。";
         String requestBody = String.format(
                 "{\"model\":\"%s\",\"input\":{\"messages\":[" +
@@ -730,25 +731,19 @@ class AIChatDialog extends JDialog {
             throw new Exception("API错误(" + responseCode + "): " + errorMsg);
         }
 
-
         try (BufferedReader br = new BufferedReader(
                 new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
             StringBuilder response = new StringBuilder();
             String line;
             while ((line = br.readLine()) != null) response.append(line);
-
-
             return parseQwenResponse(response.toString());
         }
     }
 
-
     private String parseQwenResponse(String json) {
         try {
-            // 查找 "content":" 后的内容
             int contentIdx = json.indexOf("\"content\":\"");
             if (contentIdx == -1) {
-                // 尝试旧格式
                 int textIdx = json.indexOf("\"text\":\"");
                 if (textIdx != -1) {
                     int start = textIdx + 8;
@@ -765,11 +760,10 @@ class AIChatDialog extends JDialog {
         }
     }
 
-
     private int findJsonStringEnd(String json, int start) {
         for (int i = start; i < json.length(); i++) {
             if (json.charAt(i) == '\\') {
-                i++;  // 跳过转义字符
+                i++;
             } else if (json.charAt(i) == '"') {
                 return i;
             }
@@ -784,7 +778,6 @@ class AIChatDialog extends JDialog {
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
     }
-
 
     private String unescapeJson(String s) {
         return s.replace("\\n", "\n")
@@ -919,16 +912,14 @@ class LittleDuck {
 }
 
 class RedPacket {
-    public enum Shape { RECTANGLE, CIRCLE, TRIANGLE }
     public enum Size { SMALL, MEDIUM, LARGE }
 
     private int x, y, width, height, speed, amount;
-    private Shape shape;
     private Size size;
 
-    public RedPacket(int x, int y, int w, int h, int speed, Shape shape, Size size) {
+    public RedPacket(int x, int y, int w, int h, int speed, Size size) {
         this.x = x; this.y = y; this.width = w; this.height = h;
-        this.speed = speed; this.shape = shape; this.size = size;
+        this.speed = speed; this.size = size;
         this.amount = calcAmount();
     }
 
@@ -944,17 +935,11 @@ class RedPacket {
     public void updatePosition() { y += speed; }
 
     public void draw(Graphics g, Image img) {
-        if (img != null && shape == Shape.RECTANGLE) {
+        if (img != null) {
             g.drawImage(img, x, y, width, height, null);
         } else {
             g.setColor(Color.RED);
-            switch (shape) {
-                case RECTANGLE: g.fillRect(x, y, width, height); break;
-                case CIRCLE: g.fillOval(x, y, width, height); break;
-                case TRIANGLE:
-                    g.fillPolygon(new int[]{x+width/2, x, x+width}, new int[]{y, y+height, y+height}, 3);
-                    break;
-            }
+            g.fillRect(x, y, width, height);
         }
         g.setColor(Color.YELLOW);
         g.drawString(String.valueOf(amount), x + width/2 - 5, y + height/2 + 5);
@@ -965,6 +950,7 @@ class RedPacket {
     public int getWidth() { return width; }
     public int getHeight() { return height; }
     public int getAmount() { return amount; }
+    public Size getSize() { return size; }
 }
 
 class GameTimer extends Thread {
